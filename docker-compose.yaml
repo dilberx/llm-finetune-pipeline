@@ -1,0 +1,102 @@
+# ============================================================================
+# Docker Compose: Training + Serving as separate GPU services
+#
+# Usage:
+#   docker compose up train        # Run fine-tuning
+#   docker compose up serve        # Start model server
+#   docker compose up eval         # Run evaluation
+#   docker compose run curate      # Run data curation
+# ============================================================================
+
+services:
+  # --- Data Curation (CPU-only, no GPU needed) ---
+  curate:
+    build: .
+    command: ["python", "-m", "src.data.curate", "--config", "configs/data_config.yaml"]
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+
+  # --- Fine-Tuning (requires GPU) ---
+  train:
+    build: .
+    command: ["python", "-m", "src.training.finetune", "--config", "configs/finetune_config.yaml"]
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '4gb'  # Required for PyTorch DataLoader with num_workers > 0
+    restart: on-failure:3
+
+  # --- Evaluation (requires GPU) ---
+  eval:
+    build: .
+    command: ["python", "-m", "src.evaluation.evaluate", "--config", "configs/eval_config.yaml"]
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./reports:/app/reports
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      train:
+        condition: service_completed_successfully
+
+  # --- Model Serving (requires GPU) ---
+  serve:
+    build: .
+    command: ["python", "-m", "src.serving.server", "--model", "Qwen/Qwen2.5-Coder-1.5B", "--adapter", "./checkpoints/best", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+      - huggingface_cache:/root/.cache/huggingface
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  huggingface_cache:
+    driver: local

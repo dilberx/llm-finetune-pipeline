@@ -1,0 +1,91 @@
+name: CI — Lint, Test, Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ── Lint & Type Check ──────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: pip install ruff mypy
+
+      - name: Ruff lint
+        run: ruff check src/ tests/
+
+      - name: Ruff format check
+        run: ruff format --check src/ tests/
+
+      - name: Type check (non-GPU modules)
+        run: |
+          pip install pyyaml rich types-PyYAML
+          mypy src/utils/ src/data/ --ignore-missing-imports --no-error-summary || true
+
+  # ── Unit Tests (CPU-only) ──────────────────────────────────
+  test:
+    name: Tests (CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pyyaml rich datasketch scipy numpy pytest polars datasets transformers peft accelerate bitsandbytes trl
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short -x
+
+      - name: Verify imports
+        run: |
+          python -c "from src.utils.config import load_config, PipelineConfig; print('config OK')"
+          python -c "from src.data.curate import QualityFilter; print('data OK')"
+          python -c "from src.evaluation.metrics import compute_comparison_stats; print('eval OK')"
+          python -c "from src.utils.logging import get_logger; print('logging OK')"
+          python -c "from src.utils.gpu import GPUResourceManager; print('gpu OK')"
+
+  # ── Docker Build ───────────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: llm-finetune-pipeline:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,80 @@
+# ============================================================================
+# LLM Fine-Tuning Configuration
+# ============================================================================
+# Supports QLoRA fine-tuning of code models on consumer GPUs (10GB+ VRAM)
+# ============================================================================
+
+# --- Model Configuration ---
+model:
+  name: "Qwen/Qwen2.5-Coder-1.5B"
+  revision: "main"
+  trust_remote_code: true
+  torch_dtype: "bfloat16"
+
+# --- Quantization (QLoRA) ---
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"              # nf4 or fp4
+  double_quant: true             # nested quantization for memory savings
+  compute_dtype: "bfloat16"
+
+# --- LoRA Configuration ---
+lora:
+  r: 16                          # LoRA rank
+  alpha: 32                      # LoRA alpha (scaling factor)
+  dropout: 0.05
+  target_modules:                # modules to apply LoRA to
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+# --- Training Hyperparameters ---
+training:
+  output_dir: "./checkpoints"
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 4  # effective batch size = 4 * 4 = 16
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_length: 2048
+
+  # --- Logging ---
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 200
+  save_total_limit: 3
+
+  # --- Performance ---
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  optim: "paged_adamw_8bit"
+
+  # --- Tracking ---
+  report_to: "wandb"             # "wandb", "tensorboard", or "none"
+  run_name: "qwen2.5-coder-1.5b-code-lora"
+
+# --- Dataset ---
+dataset:
+  name: "curated"                # "curated" uses local pipeline, or HF dataset name
+  curated_path: "./data/curated/train.jsonl"
+  eval_path: "./data/curated/eval.jsonl"
+  text_field: "text"
+  max_samples: null              # null = use all samples
+
+# --- Hardware ---
+hardware:
+  device_map: "auto"
+  seed: 42

@@ -1,0 +1,71 @@
+# ============================================================================
+# Data Curation Configuration
+# ============================================================================
+
+# --- Source Datasets ---
+sources:
+  - name: "bigcode/starcoderdata"
+    subset: "python"
+    split: "train"
+    max_samples: 50000
+    streaming: true
+
+# --- Quality Filters ---
+filters:
+  # Minimum and maximum line counts
+  min_lines: 5
+  max_lines: 500
+
+  # AST validation (only syntactically valid code)
+  ast_valid: true
+
+  # Minimum alphanumeric ratio (filters out binary/encoded content)
+  min_alpha_ratio: 0.25
+
+  # Maximum line length
+  max_line_length: 200
+
+  # Filter files with too many comments vs code
+  max_comment_ratio: 0.6
+
+  # Language filter
+  language: "python"
+
+# --- Deduplication ---
+deduplication:
+  enabled: true
+  method: "minhash"
+  num_perm: 128
+  threshold: 0.7                  # Jaccard similarity threshold
+  ngram_size: 5
+
+# --- Instruction Synthesis ---
+synthesis:
+  enabled: true
+  method: "self_instruct"
+  # Template for converting raw code to instruction-following format
+  templates:
+    code_completion:
+      instruction: "Complete the following Python function:"
+      input_format: "signature_and_docstring"
+    code_explanation:
+      instruction: "Explain what the following Python code does:"
+      input_format: "full_code"
+    bug_fix:
+      instruction: "Find and fix the bug in the following Python code:"
+      input_format: "full_code_with_bug"
+
+# --- Output ---
+output:
+  train_path: "./data/curated/train.jsonl"
+  eval_path: "./data/curated/eval.jsonl"
+  eval_split_ratio: 0.05
+  format: "jsonl"
+  shuffle: true
+  seed: 42
+
+# --- Processing ---
+processing:
+  num_workers: 4
+  batch_size: 1000
+  log_every: 5000

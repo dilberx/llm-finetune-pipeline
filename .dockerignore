@@ -1,0 +1,33 @@
+.git
+.github
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+venv/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Training outputs (mounted as volumes instead)
+checkpoints/
+data/curated/
+reports/
+logs/
+
+# Model files
+*.bin
+*.safetensors
+*.gguf
+
+# W&B
+wandb/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,63 @@
+# ============================================================================
+# Model Evaluation Configuration
+# ============================================================================
+
+# --- Models to Evaluate ---
+models:
+  base:
+    name: "Qwen/Qwen2.5-Coder-1.5B"
+    revision: "main"
+    trust_remote_code: true
+  finetuned:
+    name: "Qwen/Qwen2.5-Coder-1.5B"
+    adapter_path: "./checkpoints/best"
+    trust_remote_code: true
+
+# --- Quantization (for evaluation) ---
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"
+  double_quant: true
+  compute_dtype: "bfloat16"
+
+# --- Benchmarks ---
+benchmarks:
+  humaneval:
+    enabled: true
+    num_samples_per_task: 10      # for pass@k estimation
+    k_values: [1, 5, 10]
+    temperature: 0.8
+    top_p: 0.95
+    max_new_tokens: 512
+
+  perplexity:
+    enabled: true
+    dataset: "wikitext"           # or path to custom eval corpus
+    stride: 512
+    max_length: 2048
+
+  code_completion:
+    enabled: true
+    dataset: "./data/eval/code_completion.jsonl"
+    max_new_tokens: 256
+    temperature: 0.2
+
+# --- Comparison ---
+comparison:
+  statistical_test: "paired_t_test"
+  confidence_level: 0.95
+  num_bootstrap_samples: 1000
+
+# --- Output ---
+output:
+  report_dir: "./reports"
+  format: ["markdown", "json"]
+  include_plots: true
+  include_raw_results: true
+
+# --- Hardware ---
+hardware:
+  device_map: "auto"
+  batch_size: 8
+  seed: 42
