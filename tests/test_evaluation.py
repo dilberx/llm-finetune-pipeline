@@ -1121,3 +1121,36 @@ class TestPoolTaskFiltering:
         path.write_text('{"prompt": "a", "completion": "b"}\n')
         assert load_pool(path, task="code_completion") == []
         assert len(load_pool(path)) == 1
+
+
+class TestProxyPrefixScoring:
+    """
+    Scoring only the opening tokens is meant to measure format onset, which
+    teacher-forcing the whole reference cannot see.
+    """
+
+    def test_prefix_truncates_the_scored_completion(self):
+        input_ids, labels = build_scoring_inputs(
+            [1, 2], [10, 11, 12, 13], max_length=20, prefix_tokens=2
+        )
+        assert input_ids == [1, 2, 10, 11]
+        assert labels == [-100, -100, 10, 11]
+
+    def test_prefix_longer_than_completion_is_harmless(self):
+        full = build_scoring_inputs([1], [10, 11], max_length=20)
+        clipped = build_scoring_inputs([1], [10, 11], max_length=20, prefix_tokens=99)
+        assert full == clipped
+
+    def test_zero_prefix_is_unscoreable(self):
+        assert build_scoring_inputs([1], [10, 11], max_length=20, prefix_tokens=0) is None
+
+    def test_none_prefix_scores_the_whole_completion(self):
+        _, labels = build_scoring_inputs([1], [10, 11, 12], max_length=20, prefix_tokens=None)
+        assert labels.count(-100) == 1
+        assert labels[1:] == [10, 11, 12]
+
+    def test_prefix_relaxes_the_max_length_constraint(self):
+        """A long completion becomes scoreable once only its prefix is used."""
+        long_completion = list(range(100, 200))
+        assert build_scoring_inputs([1], long_completion, max_length=10) is None
+        assert build_scoring_inputs([1], long_completion, max_length=10, prefix_tokens=4)

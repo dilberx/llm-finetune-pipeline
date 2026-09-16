@@ -129,6 +129,7 @@ def build_scoring_inputs(
     prompt_ids: list[int],
     completion_ids: list[int],
     max_length: int,
+    prefix_tokens: int | None = None,
 ) -> tuple[list[int], list[int]] | None:
     """
     Assemble token ids and labels for teacher-forced scoring of a completion.
@@ -149,6 +150,8 @@ def build_scoring_inputs(
         prompt_ids: Token ids of the prompt.
         completion_ids: Token ids of the reference completion.
         max_length: Maximum combined length.
+        prefix_tokens: Score only the first N completion tokens. None scores
+            all of them.
 
     Returns:
         (input_ids, labels), or None when there is nothing scoreable -- an
@@ -156,6 +159,10 @@ def build_scoring_inputs(
     """
     if not completion_ids or max_length <= 0:
         return None
+    if prefix_tokens is not None:
+        if prefix_tokens <= 0:
+            return None
+        completion_ids = completion_ids[:prefix_tokens]
     if len(completion_ids) >= max_length:
         return None
 
@@ -186,15 +193,22 @@ class CompletionLikelihoodScorer:
     roughly what generating on dozens does.
     """
 
-    def __init__(self, max_length: int = 1024):
+    def __init__(self, max_length: int = 1024, prefix_tokens: int | None = None):
         self.max_length = max_length
+        # Scoring only the opening tokens measures whether the model starts the
+        # way the reference starts -- which is what format compliance is.
+        # Teacher-forcing the whole reference cannot see that, because it
+        # supplies the very tokens whose production is in question.
+        self.prefix_tokens = prefix_tokens
 
     def score_one(self, model, tokenizer, example: PoolExample) -> float | None:
         """Return the per-token likelihood of one reference completion."""
         prompt_ids = tokenizer(example.prompt, add_special_tokens=False).input_ids
         completion_ids = tokenizer(example.completion, add_special_tokens=False).input_ids
 
-        built = build_scoring_inputs(prompt_ids, completion_ids, self.max_length)
+        built = build_scoring_inputs(
+            prompt_ids, completion_ids, self.max_length, self.prefix_tokens
+        )
         if built is None:
             return None
         input_ids, labels = built
