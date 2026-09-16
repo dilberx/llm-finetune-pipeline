@@ -37,25 +37,32 @@ build: ## Build Docker image
 up: ## Start all services (train → eval → serve)
 	docker compose up --build
 
+# Prefer the project virtualenv; fall back to whatever python is on PATH.
+# A bare `python` does not exist on many systems (Debian/Ubuntu ship only
+# python3), which silently broke every target below with "No such file".
+PYTHON ?= $(shell if [ -x venv/bin/python ]; then echo venv/bin/python; \
+	elif command -v python >/dev/null 2>&1; then echo python; \
+	else echo python3; fi)
+
 # --- Pipeline Stages ---
 
 curate: ## Run data curation pipeline
-	python -m src.data.curate --config configs/data_config.yaml
+	$(PYTHON) -m src.data.curate --config configs/data_config.yaml
 
 train: ## Run fine-tuning
-	python -m src.training.finetune --config configs/finetune_config.yaml
+	$(PYTHON) -m src.training.finetune --config configs/finetune_config.yaml
 
 train-resume: ## Resume training from latest checkpoint
-	python -m src.training.finetune --config configs/finetune_config.yaml --resume-from auto
+	$(PYTHON) -m src.training.finetune --config configs/finetune_config.yaml --resume-from auto
 
 eval: ## Run evaluation
-	python -m src.evaluation.evaluate --config configs/eval_config.yaml
+	$(PYTHON) -m src.evaluation.evaluate --config configs/eval_config.yaml
 
 sweep: ## Score checkpoints and calibrate the eval set (IRT)
-	python -m src.evaluation.sweep --config configs/eval_config.yaml
+	$(PYTHON) -m src.evaluation.sweep --config configs/eval_config.yaml
 
 serve: ## Start model server
-	python -m src.serving.server --config configs/serving_config.yaml
+	$(PYTHON) -m src.serving.server --config configs/serving_config.yaml
 
 # --- Profiling & Monitoring ---
 
@@ -67,7 +74,7 @@ profile: ## Profile training for 5 steps and generate report
 	"
 
 gpu-status: ## Show GPU status and memory
-	python -c " \
+	$(PYTHON) -c " \
 		from src.utils.gpu import GPUResourceManager; \
 		mgr = GPUResourceManager(); \
 		for s in mgr.get_all_snapshots(): \
