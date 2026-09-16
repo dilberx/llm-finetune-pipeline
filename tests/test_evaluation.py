@@ -32,6 +32,15 @@ from src.evaluation.metrics import (
     paired_difference,
 )
 from src.evaluation.ppi import optimal_lambda, ppi_mean, ppi_mean_difference
+from src.evaluation.proxy import (
+    PoolExample,
+    align_gold_with_proxy,
+    align_proxy_scores,
+    build_scoring_inputs,
+    likelihood_from_nll,
+    load_pool,
+    split_chatml,
+)
 
 
 class TestPassAtK:
@@ -777,3 +786,165 @@ class TestParseRatePairing:
         assert "paired" in entry
         assert entry["paired"]["n_pairs"] == 8
         assert entry["paired"]["mean_difference"] == pytest.approx(0.5)
+
+
+class TestScoringInputs:
+    def test_masks_prompt_and_keeps_completion(self):
+        input_ids, labels = build_scoring_inputs([1, 2, 3], [4, 5], max_length=10)
+        assert input_ids == [1, 2, 3, 4, 5]
+        assert labels == [-100, -100, -100, 4, 5]
+
+    def test_truncates_prompt_from_the_front(self):
+        """The completion being scored must survive intact."""
+        input_ids, labels = build_scoring_inputs([1, 2, 3, 4, 5], [8, 9], max_length=4)
+        assert input_ids == [4, 5, 8, 9]
+        assert labels == [-100, -100, 8, 9]
+
+    def test_empty_completion_is_unscoreable(self):
+        assert build_scoring_inputs([1, 2], [], max_length=10) is None
+
+    def test_completion_longer_than_window_is_unscoreable(self):
+        assert build_scoring_inputs([1], [2, 3, 4], max_length=3) is None
+
+    def test_label_length_always_matches_input_length(self):
+        for max_length in (3, 5, 20):
+            built = build_scoring_inputs([1, 2, 3, 4], [5, 6], max_length)
+            if built is not None:
+                assert len(built[0]) == len(built[1])
+
+
+class TestLikelihoodOrientation:
+    def test_lower_loss_scores_higher(self):
+        """PPI's clamped weight assumes the proxy rises with quality."""
+        assert likelihood_from_nll(0.1) > likelihood_from_nll(2.0)
+
+    def test_bounded_in_unit_interval(self):
+        for nll in (0.0, 0.5, 5.0, 50.0):
+            assert 0.0 < likelihood_from_nll(nll) <= 1.0
+
+    def test_non_finite_loss_scores_zero(self):
+        assert likelihood_from_nll(float("inf")) == 0.0
+        assert likelihood_from_nll(float("nan")) == 0.0
+
+
+class TestPoolLoading:
+    def test_reads_prompt_completion_rows(self, tmp_path):
+        path = tmp_path / "p.jsonl"
+        path.write_text('{"prompt": "def f():", "completion": "    return 1"}\n')
+        pool = load_pool(path)
+        assert pool[0].prompt == "def f():"
+
+    def test_splits_chatml_rows(self, tmp_path):
+        path = tmp_path / "p.jsonl"
+        path.write_text(
+            '{"text": "<|im_start|>user\\nDo it<|im_end|>\\n'
+            '<|im_start|>assistant\\nreturn 1<|im_end|>"}\n'
+        )
+        pool = load_pool(path)
+        assert len(pool) == 1
+        assert pool[0].completion == "return 1"
+        assert pool[0].prompt.endswith("<|im_start|>assistant\n")
+
+    def test_skips_malformed_lines_without_failing(self):
+        assert split_chatml("no marker here") is None
+
+    def test_skips_empty_assistant_turn(self):
+        assert split_chatml("<|im_start|>assistant\n   <|im_end|>") is None
+
+    def test_respects_the_limit(self, tmp_path):
+        path = tmp_path / "p.jsonl"
+        path.write_text('{"prompt": "a", "completion": "b"}\n' * 50)
+        assert len(load_pool(path, limit=5)) == 5
+
+
+class TestProxyAlignment:
+    def test_drops_positions_either_model_could_not_score(self):
+        base, ft = align_proxy_scores([0.5, None, 0.7], [0.6, 0.2, None])
+        assert base == [0.5]
+        assert ft == [0.6]
+
+    def test_mismatched_lengths_rejected(self):
+        with pytest.raises(ValueError, match="must align"):
+            align_proxy_scores([0.1], [0.1, 0.2])
+
+    def test_gold_alignment_matches_on_prompt(self):
+        base_raw = [{"prompt": "a", "token_f1": 0.1}, {"prompt": "b", "token_f1": 0.2}]
+        ft_raw = [{"prompt": "b", "token_f1": 0.5}, {"prompt": "a", "token_f1": 0.4}]
+        examples = [PoolExample("a", "x"), PoolExample("b", "y")]
+        aligned = align_gold_with_proxy(base_raw, ft_raw, examples, [0.8, 0.7], [0.9, 0.75])
+
+        assert aligned["gold_base"] == [0.1, 0.2]
+        assert aligned["gold_finetuned"] == [0.4, 0.5]
+        assert aligned["proxy_base"] == [0.8, 0.7]
+
+    def test_returns_none_without_enough_overlap(self):
+        base_raw = [{"prompt": "a", "token_f1": 0.1}]
+        ft_raw = [{"prompt": "a", "token_f1": 0.4}]
+        examples = [PoolExample("a", "x")]
+        assert align_gold_with_proxy(base_raw, ft_raw, examples, [0.8], [0.9]) is None
+
+
+class TestProxyDiagnostics:
+    def _estimate(self, flip_proxy: bool):
+        rng = np.random.default_rng(5)
+        truth_b = rng.normal(0.10, 0.06, 300)
+        truth_f = truth_b + 0.12 + rng.normal(0, 0.02, 300)
+        sign = -1.0 if flip_proxy else 1.0
+        pb, pf = sign * truth_b, sign * truth_f
+        return ppi_mean_difference(
+            gold_base=truth_b[:16], gold_finetuned=truth_f[:16],
+            proxy_base=pb[:16], proxy_finetuned=pf[:16],
+            pool_proxy_base=pb, pool_proxy_finetuned=pf,
+        )
+
+    def test_well_oriented_proxy_has_no_warning(self):
+        estimate = self._estimate(flip_proxy=False)
+        assert estimate.proxy_correlation > 0.5
+        assert estimate.warning() is None
+
+    def test_inverted_proxy_is_caught_rather_than_silently_discarded(self):
+        """Without this, a backwards proxy looks exactly like a useless one."""
+        estimate = self._estimate(flip_proxy=True)
+        assert estimate.lambda_weight == 0.0
+        assert "orientation" in estimate.warning()
+
+    def test_estimate_is_still_valid_when_the_proxy_is_inverted(self):
+        estimate = self._estimate(flip_proxy=True)
+        assert estimate.estimate == pytest.approx(estimate.classical_estimate)
+
+
+class TestPPIReportSection:
+    def _ppi_payload(self):
+        rng = np.random.default_rng(9)
+        truth_b = rng.normal(0.10, 0.06, 400)
+        truth_f = truth_b + 0.13 + rng.normal(0, 0.02, 400)
+        proxy_b = truth_b + rng.normal(0, 0.03, 400)
+        proxy_f = truth_f + rng.normal(0, 0.03, 400)
+        estimate = ppi_mean_difference(
+            gold_base=truth_b[:16], gold_finetuned=truth_f[:16],
+            proxy_base=proxy_b[:16], proxy_finetuned=proxy_f[:16],
+            pool_proxy_base=proxy_b, pool_proxy_finetuned=proxy_f,
+        )
+        payload = estimate.to_dict()
+        payload["metric"] = "token_f1"
+        payload["pool"] = {"pool_size": 400, "scored": 400, "unscoreable": 0}
+        return payload
+
+    def test_shows_both_estimators_side_by_side(self):
+        body = "\n".join(ModelEvaluator._ppi_lines(self._ppi_payload()))
+        assert "| Gold only |" in body
+        assert "| Prediction-powered |" in body
+
+    def test_reports_effective_sample_size(self):
+        body = "\n".join(ModelEvaluator._ppi_lines(self._ppi_payload()))
+        assert "carry the weight of about" in body
+
+    def test_reports_proxy_correlation(self):
+        body = "\n".join(ModelEvaluator._ppi_lines(self._ppi_payload()))
+        assert "Proxy correlation" in body
+
+    def test_appears_in_the_written_report(self, tmp_path):
+        results = {"ppi": self._ppi_payload()}
+        path = tmp_path / "r.md"
+        ModelEvaluator({})._write_markdown_report(results, path)
+        assert "## Prediction-Powered Estimate" in path.read_text(encoding="utf-8")

@@ -48,6 +48,39 @@ class PPIEstimate:
     classical_ci_high: float
     effective_gold_n: float
     confidence_level: float
+    proxy_correlation: float = 0.0
+    lambda_saturated: bool = False
+
+    def warning(self) -> str | None:
+        """
+        Describe a proxy that is not earning its place, or None.
+
+        The failure worth catching is a proxy pointing the wrong way. The
+        tuned weight is clamped at zero, so a negatively-correlated proxy
+        produces exactly the classical estimate and looks indistinguishable
+        from a proxy that simply carried no signal.
+        """
+        if self.n_unlabeled == 0:
+            return None
+        if self.proxy_correlation < 0 and self.lambda_weight == 0.0:
+            return (
+                f"The proxy is negatively correlated with the measured metric "
+                f"(r={self.proxy_correlation:+.2f}), so the pool was discarded and this is "
+                f"the plain {self.n_gold}-example estimate. Check the proxy's orientation: "
+                f"it must rise with quality."
+            )
+        if self.lambda_weight == 0.0:
+            return (
+                f"The proxy carried no usable signal (r={self.proxy_correlation:+.2f}); the "
+                f"pool was discarded and this is the plain {self.n_gold}-example estimate."
+            )
+        if self.lambda_saturated:
+            return (
+                f"The tuned weight hit its bound, so the pool is being used less than the "
+                f"data suggests it could be (r={self.proxy_correlation:+.2f}). The estimate "
+                f"is valid but not as tight as a rescaled proxy would make it."
+            )
+        return None
 
     @property
     def ci_width(self) -> float:
@@ -82,6 +115,9 @@ class PPIEstimate:
             "effective_gold_n": self.effective_gold_n,
             "confidence_level": self.confidence_level,
             "excludes_zero": self.excludes_zero,
+            "proxy_correlation": self.proxy_correlation,
+            "lambda_saturated": self.lambda_saturated,
+            "warning": self.warning(),
         }
 
 
@@ -115,21 +151,8 @@ def optimal_lambda(
     Returns:
         lambda in [0, 1]. Returns 0.0 when the proxy has no variance.
     """
-    y = np.asarray(gold_labels, dtype=float)
-    f = np.asarray(gold_proxy, dtype=float)
-    n = len(y)
-
-    if n < 2 or n_unlabeled < 1:
-        return 0.0
-
-    var_f = float(np.var(f, ddof=1))
-    if var_f <= 0:
-        # A constant proxy cannot explain anything.
-        return 0.0
-
-    cov_yf = float(np.cov(y, f, ddof=1)[0, 1])
-    lam = cov_yf / (var_f * (1.0 + n / n_unlabeled))
-    return float(np.clip(lam, 0.0, 1.0))
+    raw = _unclamped_lambda(gold_labels, gold_proxy, n_unlabeled)
+    return float(np.clip(raw, 0.0, 1.0))
 
 
 def ppi_mean(
@@ -206,7 +229,9 @@ def ppi_mean(
             confidence_level=confidence_level,
         )
 
-    lam = optimal_lambda(y, f, big_n) if power_tune else 1.0
+    raw_lambda = _unclamped_lambda(y, f, big_n) if power_tune else 1.0
+    lam = float(np.clip(raw_lambda, 0.0, 1.0)) if power_tune else 1.0
+    correlation = _correlation(y, f)
 
     estimate = float(np.mean(y) + lam * (np.mean(f_pool) - np.mean(f)))
 
@@ -233,7 +258,36 @@ def ppi_mean(
         classical_ci_high=classical_hi,
         effective_gold_n=effective_n,
         confidence_level=confidence_level,
+        proxy_correlation=correlation,
+        lambda_saturated=bool(power_tune and raw_lambda != lam),
     )
+
+
+def _unclamped_lambda(
+    gold_labels: Sequence[float],
+    gold_proxy: Sequence[float],
+    n_unlabeled: int,
+) -> float:
+    """Variance-minimising weight before clamping, so saturation is detectable."""
+    y = np.asarray(gold_labels, dtype=float)
+    f = np.asarray(gold_proxy, dtype=float)
+    n = len(y)
+    if n < 2 or n_unlabeled < 1:
+        return 0.0
+    var_f = float(np.var(f, ddof=1))
+    if var_f <= 0:
+        return 0.0
+    cov_yf = float(np.cov(y, f, ddof=1)[0, 1])
+    return cov_yf / (var_f * (1.0 + n / n_unlabeled))
+
+
+def _correlation(gold_labels: np.ndarray, gold_proxy: np.ndarray) -> float:
+    """Pearson correlation on the gold overlap, 0 when either side is constant."""
+    if len(gold_labels) < 2:
+        return 0.0
+    if np.var(gold_labels) <= 0 or np.var(gold_proxy) <= 0:
+        return 0.0
+    return float(np.corrcoef(gold_labels, gold_proxy)[0, 1])
 
 
 def ppi_mean_difference(

@@ -26,6 +26,14 @@ from rich.table import Table
 
 from .benchmarks import HumanEvalBenchmark, PerplexityBenchmark, CodeCompletionBenchmark
 from .metrics import compute_comparison_stats
+from .ppi import ppi_mean_difference
+from .proxy import (
+    CompletionLikelihoodScorer,
+    align_gold_with_proxy,
+    align_proxy_scores,
+    load_pool,
+    summarize_pool,
+)
 
 console = Console()
 
@@ -44,6 +52,8 @@ class ModelEvaluator:
         self.comparison_config = config.get("comparison", {})
         self.output_config = config.get("output", {})
         self.hardware_config = config.get("hardware", {})
+        self.ppi_config = config.get("ppi", {})
+        self._pool_cache: list | None = None
 
     def _load_model(self, model_config: dict) -> tuple:
         """Load a model (base or fine-tuned with adapter)."""
@@ -124,7 +134,105 @@ class ModelEvaluator:
             )
             results["benchmarks"]["code_completion"] = benchmark.run(model, tokenizer)
 
+        proxy = self._score_proxy(model, tokenizer, model_name)
+        if proxy is not None:
+            results["proxy"] = proxy
+
         return results
+
+    def _load_pool(self) -> list:
+        """Load and cache the unlabelled pool, shared across both models."""
+        if self._pool_cache is None:
+            self._pool_cache = load_pool(
+                self.ppi_config["pool_path"],
+                limit=self.ppi_config.get("max_pool_samples", 2000),
+            )
+        return self._pool_cache
+
+    def _score_proxy(self, model, tokenizer, model_name: str) -> dict[str, Any] | None:
+        """
+        Proxy-score the gold examples and the unlabelled pool for one model.
+
+        Runs while the model is loaded, since both models are never resident at
+        once. Scores are kept position-aligned so the two passes can be paired
+        after the second model has been evaluated.
+        """
+        if not self.ppi_config.get("enabled", False):
+            return None
+
+        cc_config = self.benchmarks_config.get("code_completion", {})
+        gold_path = cc_config.get("dataset")
+        if not gold_path or not Path(gold_path).exists():
+            console.print("  [yellow]PPI needs the code completion set; skipping[/yellow]")
+            return None
+        if not Path(self.ppi_config.get("pool_path", "")).exists():
+            console.print("  [yellow]PPI pool not found; skipping[/yellow]")
+            return None
+
+        scorer = CompletionLikelihoodScorer(
+            max_length=self.ppi_config.get("max_length", 1024)
+        )
+        gold_examples = load_pool(gold_path)
+        pool_examples = self._load_pool()
+
+        console.print(
+            f"\n[bold cyan]Proxy-scoring {len(pool_examples)} pool examples "
+            f"on {model_name}...[/bold cyan]"
+        )
+        return {
+            "gold": scorer.score(model, tokenizer, gold_examples, "  Gold overlap..."),
+            "pool": scorer.score(model, tokenizer, pool_examples, "  Unlabelled pool..."),
+        }
+
+    def _compute_ppi(self, results: dict[str, Any]) -> dict[str, Any] | None:
+        """
+        Estimate the fine-tuning effect over the whole pool, not just the gold set.
+
+        The gold set is what was actually generated and scored; the pool is
+        everything the proxy could reach. PPI carries the gold measurement onto
+        the pool and corrects the proxy's bias using their overlap.
+        """
+        base, finetuned = results.get("base"), results.get("finetuned")
+        if not base or not finetuned:
+            return None
+        if "proxy" not in base or "proxy" not in finetuned:
+            return None
+
+        metric = self.ppi_config.get("metric", "token_f1")
+        base_cc = base.get("benchmarks", {}).get("code_completion", {})
+        ft_cc = finetuned.get("benchmarks", {}).get("code_completion", {})
+        base_raw, ft_raw = base_cc.get("raw_results"), ft_cc.get("raw_results")
+        if not base_raw or not ft_raw:
+            return None
+
+        gold_examples = load_pool(self.benchmarks_config["code_completion"]["dataset"])
+        aligned = align_gold_with_proxy(
+            base_raw, ft_raw, gold_examples,
+            base["proxy"]["gold"], finetuned["proxy"]["gold"], metric=metric,
+        )
+        if aligned is None:
+            console.print("  [yellow]No gold/proxy overlap; skipping PPI[/yellow]")
+            return None
+
+        pool_base, pool_ft = align_proxy_scores(
+            base["proxy"]["pool"], finetuned["proxy"]["pool"]
+        )
+
+        estimate = ppi_mean_difference(
+            gold_base=aligned["gold_base"],
+            gold_finetuned=aligned["gold_finetuned"],
+            proxy_base=aligned["proxy_base"],
+            proxy_finetuned=aligned["proxy_finetuned"],
+            pool_proxy_base=pool_base,
+            pool_proxy_finetuned=pool_ft,
+            confidence_level=self.comparison_config.get("confidence_level", 0.95),
+        )
+        payload = estimate.to_dict()
+        payload["metric"] = metric
+        payload["pool"] = summarize_pool(
+            self._load_pool(), base["proxy"]["pool"], finetuned["proxy"]["pool"]
+        )
+        return payload
 
     def run(self) -> dict[str, Any]:
         """
@@ -159,6 +267,11 @@ class ModelEvaluator:
                 all_results["finetuned"],
                 confidence_level=self.comparison_config.get("confidence_level", 0.95),
             )
+
+        # Prediction-powered estimate over the unlabelled pool
+        ppi_result = self._compute_ppi(all_results)
+        if ppi_result is not None:
+            all_results["ppi"] = ppi_result
 
         # Generate reports
         self._generate_reports(all_results)
@@ -386,6 +499,61 @@ class ModelEvaluator:
             )
         return lines
 
+    @staticmethod
+    def _ppi_lines(ppi: dict[str, Any]) -> list[str]:
+        """
+        Render the prediction-powered estimate beside the gold-only one.
+
+        Both are shown because the comparison is the point: the gold-only
+        interval is what the generated examples alone support, and the PPI
+        interval is what they support once the proxy-scored pool is folded in.
+        """
+        classical = ppi["classical"]
+        pool = ppi.get("pool", {})
+
+        lines = ["\n## Prediction-Powered Estimate\n"]
+        lines.append(
+            f"Effect of fine-tuning on `{ppi['metric']}`, estimated over "
+            f"{pool.get('scored', ppi['n_unlabeled'])} proxy-scored examples rather than the "
+            f"{ppi['n_gold']} that were generated."
+        )
+        lines.append("")
+        lines.append("| Estimator | Estimate | 95% CI | CI width | Evidence |")
+        lines.append("|-----------|----------|--------|----------|----------|")
+        lines.append(
+            f"| Gold only | {classical['estimate']:+.4f} "
+            f"| [{classical['ci_low']:+.4f}, {classical['ci_high']:+.4f}] "
+            f"| {classical['ci_width']:.4f} "
+            f"| {ppi['n_gold']} generated |"
+        )
+        lines.append(
+            f"| Prediction-powered | {ppi['estimate']:+.4f} "
+            f"| [{ppi['ci_low']:+.4f}, {ppi['ci_high']:+.4f}] "
+            f"| {ppi['ci_width']:.4f} "
+            f"| {ppi['n_gold']} generated + {ppi['n_unlabeled']} scored |"
+        )
+        lines.append("")
+        lines.append(
+            f"- Proxy correlation on the overlap: **r = {ppi['proxy_correlation']:+.2f}**, "
+            f"tuned weight λ = {ppi['lambda']:.2f}."
+        )
+        lines.append(
+            f"- The {ppi['n_gold']} generated examples now carry the weight of about "
+            f"**{ppi['effective_gold_n']:.0f}**."
+        )
+        if ppi["excludes_zero"]:
+            lines.append("- The interval excludes zero, so the direction of the effect holds.")
+        else:
+            lines.append(
+                "- The interval spans zero: the direction of the effect is still not "
+                "established, even with the pool."
+            )
+
+        warning = ppi.get("warning")
+        if warning:
+            lines.append(f"\n> **Warning:** {warning}")
+        return lines
+
     def _write_markdown_report(self, results: dict[str, Any], path: Path) -> None:
         """Write a detailed markdown evaluation report."""
         lines = [
@@ -408,6 +576,9 @@ class ModelEvaluator:
 
         if "comparison" in results:
             lines.extend(self._comparison_lines(results["comparison"]))
+
+        if "ppi" in results:
+            lines.extend(self._ppi_lines(results["ppi"]))
 
         with open(path, "w") as f:
             f.write("\n".join(lines))
