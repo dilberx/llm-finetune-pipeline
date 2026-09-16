@@ -30,9 +30,45 @@ A production-grade ML training platform for fine-tuning, evaluating, and serving
 ├─────────────────────────────────────────────────────────────────────┤
 │  CI/CD: GitHub Actions (lint → test → Docker build)                  │
 │  Config: YAML + env overrides + dataclass validation                 │
-│  Tests: 68 unit tests (CPU-compatible, no GPU required)              │
+│  Tests: 80 unit tests (CPU-compatible, no GPU required)              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+## Project Status
+
+A full QLoRA fine-tuning run has been completed on this pipeline.
+
+- **Base model**: Qwen/Qwen2.5-Coder-1.5B
+- **Method**: QLoRA (4-bit NF4, LoRA r=16, α=32)
+- **Training**: ~50K steps, ~22 hours on a single RTX 3080 (10 GB VRAM)
+- **Training data**: ~134K curated code instruction examples (ChatML format)
+- **Adapter**: saved to `checkpoints/best/`
+- **Training crashed 3 times** during the run — checkpoint fault tolerance handled all three resumes without data loss
+
+### Evaluation Results
+
+Two evaluations were run: one on the target code distribution, one on generic benchmarks.
+
+**Target-domain evaluation** (16 held-out code completions + 128 perplexity samples from the curated distribution):
+
+| Metric | Base | Fine-tuned | Change |
+|--------|------|-----------|--------|
+| Perplexity | 3.27 | 3.04 | −7.0% (better) |
+| Code completion token F1 | 0.10 | 0.23 | +128% (better) |
+| Code completion exact match | 0.00 | 0.00 | metric ceiling — see below |
+
+**Generic benchmark** (3-problem HumanEval sample + Wikitext perplexity):
+
+| Metric | Base | Fine-tuned | Change |
+|--------|------|-----------|--------|
+| Wikitext perplexity | 10.33 | 12.54 | +21% (worse) |
+| HumanEval pass@1 | 0.00 | 0.00 | no change |
+
+**What this means**: The adapter improved on the target code distribution — lower perplexity and better token overlap on completions. Generic prose perplexity got worse, which is expected when you specialize a model on code. The HumanEval sample is too small (3 problems) to draw conclusions from. This is a directional signal on a small eval set, not a definitive benchmark result.
+
+> **Correction:** the exact-match figure above says nothing about the model. Every reference in the eval set is wrapped in markdown code fences, so a model emitting character-perfect code still scores 0.00 unless it also reproduces the fence markers. Scoring the references against themselves confirms the ceiling is zero: `exact_match` 0/16, while AST-based equivalence scores 16/16 on the same input. The pipeline now reports `ast_match`, `ast_alpha_match`, and `parse_rate` alongside it, and flags a metric as *degenerate* when every example scores identically under both models.
+>
+> A related defect in the synthesis templates left roughly 70% of generated training prompts syntactically invalid (a docstring indented to a fixed 4 spaces regardless of whether the function was a method). That is fixed, and curation now aborts when too many synthesized examples fail to parse. **The numbers in this section predate both fixes and have not been regenerated.**
 
 ## Quick Start
 
@@ -201,7 +237,7 @@ llm-finetune-pipeline/
 │   ├── data_config.yaml
 │   ├── eval_config.yaml
 │   └── deepspeed_config.json # DeepSpeed ZeRO Stage 2 for multi-GPU
-├── tests/                    # 68 unit tests (CPU-compatible)
+├── tests/                    # 80 unit tests (CPU-compatible)
 ├── Dockerfile                # Multi-stage CUDA 12.1 container
 ├── docker-compose.yaml       # 4-service GPU orchestration
 ├── Makefile                  # Developer workflow automation
@@ -243,7 +279,7 @@ accelerate launch --config_file configs/accelerate_config.yaml \
 ## Testing
 
 ```bash
-make test       # 68 tests, all CPU-compatible
+make test       # 80 tests, all CPU-compatible
 make lint       # ruff lint + format check
 make gpu-status # Check GPU availability and VRAM
 ```

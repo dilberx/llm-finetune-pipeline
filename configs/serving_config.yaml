@@ -1,0 +1,27 @@
+# ============================================================================
+# Model Serving Configuration
+# ============================================================================
+# vLLM-based inference server with LoRA adapter support
+# ============================================================================
+
+# --- Model ---
+model_name: "Qwen/Qwen2.5-Coder-1.5B"
+adapter_path: "./checkpoints/best"       # LoRA adapter from fine-tuning
+trust_remote_code: true
+dtype: "auto"
+
+# --- Quantization ---
+quantization: null                        # null, "awq", "gptq", "squeezellm"
+
+# --- Server ---
+host: "0.0.0.0"
+port: 8000
+
+# --- Engine ---
+max_model_len: 4096
+gpu_memory_utilization: 0.85              # fraction of VRAM vLLM can use
+max_num_batched_tokens: 4096
+max_num_seqs: 64
+
+# --- Reproducibility ---
+seed: 42

@@ -190,7 +190,7 @@ class GPUResourceManager:
                 pass
 
         if HAS_TORCH and torch.cuda.is_available() and device_id < torch.cuda.device_count():
-            total = torch.cuda.get_device_properties(device_id).total_mem / (1024 ** 2)
+            total = torch.cuda.get_device_properties(device_id).total_memory / (1024 ** 2)
             used = torch.cuda.memory_allocated(device_id) / (1024 ** 2)
             return GPUSnapshot(
                 device_id=device_id,

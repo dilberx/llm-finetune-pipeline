@@ -14,7 +14,7 @@ install: ## Install all dependencies
 	pip install transformers peft datasets accelerate bitsandbytes trl
 	pip install vllm fastapi uvicorn
 	pip install polars datasketch scipy evaluate matplotlib
-	pip install pytest ruff mypy rich pyyaml wandb tensorboard
+	pip install pytest ruff mypy rich pyyaml tensorboard
 
 lint: ## Run linting and format check
 	ruff check src/ tests/
