@@ -60,6 +60,7 @@ dev = [
 [project.scripts]
 finetune = "src.training.finetune:main"
 evaluate-model = "src.evaluation.evaluate:main"
+sweep-checkpoints = "src.evaluation.sweep:main"
 curate-data = "src.data.curate:main"
 serve-model = "src.serving.server:main"
 

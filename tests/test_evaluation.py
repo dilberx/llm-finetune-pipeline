@@ -6,6 +6,7 @@ without requiring GPU or model loading.
 """
 
 import ast
+import json
 
 import numpy as np
 import pytest
@@ -40,6 +41,12 @@ from src.evaluation.proxy import (
     likelihood_from_nll,
     load_pool,
     split_chatml,
+)
+from src.evaluation.sweep import (
+    CheckpointRef,
+    build_model_config,
+    calibrate,
+    discover_checkpoints,
 )
 
 
@@ -948,3 +955,130 @@ class TestPPIReportSection:
         path = tmp_path / "r.md"
         ModelEvaluator({})._write_markdown_report(results, path)
         assert "## Prediction-Powered Estimate" in path.read_text(encoding="utf-8")
+
+
+def _make_checkpoint(root, name, step, valid=True):
+    """Create a checkpoint directory that passes or fails integrity validation."""
+    path = root / name
+    path.mkdir(parents=True, exist_ok=True)
+    if valid:
+        (path / "trainer_state.json").write_text(json.dumps({"global_step": step}))
+        (path / "adapter_model.safetensors").write_bytes(b"\x00" * 16)
+    return path
+
+
+class TestCheckpointDiscovery:
+    def test_finds_checkpoints_in_step_order(self, tmp_path):
+        for step in (2000, 500, 1000):
+            _make_checkpoint(tmp_path, f"checkpoint-{step}", step)
+        refs = discover_checkpoints(tmp_path, include_base=False)
+        assert [r.step for r in refs] == [500, 1000, 2000]
+
+    def test_ignores_non_checkpoint_directories(self, tmp_path):
+        """The real checkpoints dir holds smoke tests and diagnostic runs."""
+        for step in (500, 1000):
+            _make_checkpoint(tmp_path, f"checkpoint-{step}", step)
+        for junk in ("smoke", "smoke-nopack", "resume-blocked-checkpoint-200", "best"):
+            _make_checkpoint(tmp_path, junk, 1)
+        refs = discover_checkpoints(tmp_path, include_base=False)
+        assert {r.name for r in refs} == {"checkpoint-500", "checkpoint-1000"}
+
+    def test_skips_corrupt_checkpoints(self, tmp_path):
+        """A half-written checkpoint would enter the population as a weak model."""
+        _make_checkpoint(tmp_path, "checkpoint-500", 500)
+        broken = tmp_path / "checkpoint-900"
+        broken.mkdir()
+        (broken / "trainer_state.json").write_text("{not json")
+        refs = discover_checkpoints(tmp_path, include_base=False)
+        assert [r.name for r in refs] == ["checkpoint-500"]
+
+    def test_includes_base_as_step_zero(self, tmp_path):
+        _make_checkpoint(tmp_path, "checkpoint-500", 500)
+        refs = discover_checkpoints(tmp_path, include_base=True)
+        assert refs[0].name == "base"
+        assert refs[0].is_base
+        assert refs[0].adapter_path is None
+
+    def test_stride_spreads_the_sample(self, tmp_path):
+        for step in range(500, 5001, 500):
+            _make_checkpoint(tmp_path, f"checkpoint-{step}", step)
+        refs = discover_checkpoints(tmp_path, include_base=False, stride=3)
+        assert [r.step for r in refs] == [500, 2000, 3500, 5000]
+
+    def test_limit_keeps_the_latest(self, tmp_path):
+        for step in (500, 1000, 1500, 2000):
+            _make_checkpoint(tmp_path, f"checkpoint-{step}", step)
+        refs = discover_checkpoints(tmp_path, include_base=False, limit=2)
+        assert [r.step for r in refs] == [1500, 2000]
+
+    def test_missing_directory_yields_base_only(self, tmp_path):
+        refs = discover_checkpoints(tmp_path / "nope", include_base=True)
+        assert [r.name for r in refs] == ["base"]
+
+
+class TestSweepModelConfig:
+    def test_base_config_carries_no_adapter(self):
+        ref = CheckpointRef(name="base", adapter_path=None, step=0)
+        config = build_model_config({"name": "Qwen/Qwen2.5-Coder-1.5B"}, ref)
+        assert "adapter_path" not in config
+
+    def test_checkpoint_config_points_at_the_adapter(self):
+        ref = CheckpointRef(name="checkpoint-500", adapter_path="/ck/500", step=500)
+        config = build_model_config({"name": "m", "revision": "main"}, ref)
+        assert config["adapter_path"] == "/ck/500"
+        assert config["revision"] == "main"
+
+
+class TestCalibration:
+    def _scored(self, n_models=8, n_items=12, seed=4):
+        """Checkpoints of graded ability against items of graded difficulty."""
+        rng = np.random.default_rng(seed)
+        ability = np.linspace(-1.5, 1.5, n_models)
+        difficulty = np.linspace(-1.2, 1.2, n_items)
+        scored = {}
+        for i in range(n_models):
+            rows = []
+            for j in range(n_items):
+                p = 1 / (1 + np.exp(-(ability[i] - difficulty[j])))
+                rows.append({"prompt": f"item{j}", "ast_match": bool(rng.random() < p)})
+            scored[f"checkpoint-{(i + 1) * 500}"] = rows
+        return scored
+
+    def test_recovers_ability_ordering_across_checkpoints(self):
+        payload = calibrate(self._scored(), metric="ast_match")
+        by_name = {m["model_id"]: m["ability"] for m in payload["models"]}
+        assert by_name["checkpoint-4000"] > by_name["checkpoint-500"]
+
+    def test_recommends_a_subset_of_the_items(self):
+        payload = calibrate(self._scored(), metric="ast_match", keep_items=5)
+        assert len(payload["recommended_items"]) == 5
+        assert set(payload["recommended_items"]).issubset(
+            {item["item_id"] for item in payload["items"]}
+        )
+
+    def test_reports_degenerate_items(self):
+        scored = self._scored()
+        for rows in scored.values():
+            rows.append({"prompt": "impossible", "ast_match": False})
+        payload = calibrate(scored, metric="ast_match")
+        assert "impossible" in payload["degenerate_items"]
+
+    def test_threshold_binarizes_a_continuous_metric(self):
+        scored = {
+            f"ck{i}": [
+                {"prompt": "a", "token_f1": 0.1 * i},
+                {"prompt": "b", "token_f1": 0.9 - 0.1 * i},
+            ]
+            for i in range(6)
+        }
+        payload = calibrate(scored, metric="token_f1", threshold=0.5, keep_items=2)
+        assert payload["threshold"] == 0.5
+        assert payload["n_items_total"] == 2
+
+    def test_population_below_the_minimum_is_rejected(self):
+        scored = {
+            "base": [{"prompt": "a", "ast_match": True}],
+            "ft": [{"prompt": "a", "ast_match": False}],
+        }
+        with pytest.raises(ValueError, match="at least 5 models"):
+            calibrate(scored, metric="ast_match")

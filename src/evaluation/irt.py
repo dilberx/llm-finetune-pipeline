@@ -117,6 +117,16 @@ class IRTFit:
         }
 
 
+def _binarize(value: Any, threshold: float | None) -> float:
+    """Reduce a metric value to a 0/1 response."""
+    if threshold is None:
+        return float(bool(value))
+    try:
+        return 1.0 if float(value) >= threshold else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _sigmoid(x: np.ndarray | float) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -35.0, 35.0)))
 
@@ -291,17 +301,26 @@ def responses_from_raw_results(
     raw_results_by_model: dict[str, list[dict[str, Any]]],
     metric: str = "exact_match",
     key: str = "prompt",
+    threshold: float | None = None,
 ) -> tuple[np.ndarray, list[str], list[str]]:
     """
     Build an IRT response matrix from benchmark `raw_results` payloads.
 
     Only items present for every model are kept, so the matrix stays complete.
 
+    The 2PL model takes binary responses. Metrics that are already pass/fail
+    need no threshold; a continuous score such as token F1 does, and the choice
+    is a real one -- too high and every item looks impossible, too low and
+    every item looks trivial. Either extreme produces degenerate items that
+    carry no information.
+
     Args:
         raw_results_by_model: Model id to that model's per-example results, as
             returned under `raw_results` by CodeCompletionBenchmark.
-        metric: Which per-example field to treat as the binary response.
+        metric: Which per-example field to treat as the response.
         key: Field identifying an example across models.
+        threshold: Score at or above which an item counts as passed. None
+            treats the value as already boolean.
 
     Returns:
         (responses, item_ids, model_ids) ready for `fit_2pl`.
@@ -316,7 +335,7 @@ def responses_from_raw_results(
     per_model: dict[str, dict[str, float]] = {}
     for model in models:
         per_model[model] = {
-            str(row[key]): float(bool(row.get(metric, 0)))
+            str(row[key]): _binarize(row.get(metric, 0), threshold)
             for row in raw_results_by_model[model]
             if key in row
         }

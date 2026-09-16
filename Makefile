@@ -51,6 +51,9 @@ train-resume: ## Resume training from latest checkpoint
 eval: ## Run evaluation
 	python -m src.evaluation.evaluate --config configs/eval_config.yaml
 
+sweep: ## Score checkpoints and calibrate the eval set (IRT)
+	python -m src.evaluation.sweep --config configs/eval_config.yaml
+
 serve: ## Start model server
 	python -m src.serving.server --config configs/serving_config.yaml
 
