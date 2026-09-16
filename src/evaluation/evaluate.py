@@ -186,6 +186,21 @@ class ModelEvaluator:
             self._write_markdown_report(results, md_path)
             console.print(f"[dim]Markdown report saved: {md_path}[/dim]")
 
+    @staticmethod
+    def _format_delta(metric_name: str, base_val: float | None, ft_val: float | None) -> str:
+        """Format metric deltas with metric direction and zero values handled."""
+        if base_val is None or ft_val is None:
+            return "-"
+
+        delta = ft_val - base_val
+        if delta == 0:
+            return "[yellow]+0.0000[/yellow]"
+
+        lower_better = metric_name in ("perplexity", "avg_nll")
+        improved = delta < 0 if lower_better else delta > 0
+        color = "green" if improved else "red"
+        return f"[{color}]{delta:+.4f}[/{color}]"
+
     def _print_summary(self, results: dict[str, Any]) -> None:
         """Print a rich console summary of evaluation results."""
         table = Table(title="Evaluation Results", show_header=True, header_style="bold cyan")
@@ -219,14 +234,157 @@ class ModelEvaluator:
                     row.append(f"{base_val:.4f}" if base_val is not None else "—")
                 if "finetuned" in results:
                     row.append(f"{ft_val:.4f}" if ft_val is not None else "—")
-                if "comparison" in results and base_val and ft_val:
-                    delta = ft_val - base_val
-                    color = "green" if delta > 0 else "red"
-                    row.append(f"[{color}]{delta:+.4f}[/{color}]")
+                if "comparison" in results:
+                    row.append(self._format_delta(metric_name, base_val, ft_val))
 
                 table.add_row(*row)
 
         console.print(table)
+
+    @staticmethod
+    def _format_value(value: Any) -> str:
+        """Render a metric value, leaving non-numeric entries readable."""
+        if value is None:
+            return "—"
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return str(value)
+        return f"{value:.4f}"
+
+    @staticmethod
+    def _format_interval(paired: dict[str, Any] | None) -> str:
+        """Render a confidence interval on the paired difference."""
+        if not paired or paired.get("degenerate"):
+            return "—"
+        return f"[{paired['ci_low']:+.4f}, {paired['ci_high']:+.4f}]"
+
+    @staticmethod
+    def _format_p_value(paired: dict[str, Any] | None) -> str:
+        """Render a p-value, avoiding a misleading 0.0000."""
+        if not paired or paired.get("degenerate"):
+            return "—"
+        p_value = paired["p_value"]
+        return "<0.0001" if p_value < 0.0001 else f"{p_value:.4f}"
+
+    @staticmethod
+    def _format_significance(paired: dict[str, Any] | None) -> str:
+        """Say plainly whether the interval supports a directional claim."""
+        if not paired:
+            return "—"
+        if paired.get("degenerate"):
+            return "degenerate"
+        return "yes" if paired.get("significant") else "no"
+
+    @staticmethod
+    def _metric_warning(bench_name: str, metric_name: str, entry: dict[str, Any]) -> str | None:
+        """
+        Return a warning when a metric cannot support the claim it looks like.
+
+        A degenerate metric is the case worth shouting about: it reports a
+        clean-looking 0.0000 difference that is a property of the metric, not
+        of the models, and no sample size will change it.
+        """
+        paired = entry.get("paired")
+        if paired and paired.get("degenerate"):
+            return (
+                f"`{bench_name}.{metric_name}` scored every example identically under both "
+                f"models across {paired['n_pairs']} pairs. This metric cannot separate them "
+                f"on this set at any sample size — treat it as a measurement ceiling, not a "
+                f"null result."
+            )
+        if paired and not paired.get("significant"):
+            return (
+                f"`{bench_name}.{metric_name}` has a {paired['confidence_level']:.0%} interval "
+                f"spanning zero ({ModelEvaluator._format_interval(paired)}), so the direction "
+                f"of the change is not established by {paired['n_pairs']} examples."
+            )
+        return None
+
+    def _comparison_lines(self, comparison: dict[str, Any]) -> list[str]:
+        """Render the statistical comparison as tables rather than raw dicts."""
+        lines = ["\n## Statistical Comparison\n"]
+        warnings: list[str] = []
+
+        for bench_name in sorted(k for k in comparison if k != "summary"):
+            metrics = comparison[bench_name]
+            if not metrics:
+                continue
+
+            lines.append(f"\n### {bench_name}\n")
+            lines.append("| Metric | Base | Fine-tuned | Δ | 95% CI | p | n | Signif. |")
+            lines.append("|--------|------|-----------|---|--------|---|---|---------|")
+
+            for metric_name in sorted(metrics):
+                entry = metrics[metric_name]
+                paired = entry.get("paired")
+                lines.append(
+                    f"| {metric_name} "
+                    f"| {self._format_value(entry.get('base'))} "
+                    f"| {self._format_value(entry.get('finetuned'))} "
+                    f"| {entry.get('absolute_diff', 0):+.4f} "
+                    f"| {self._format_interval(paired)} "
+                    f"| {self._format_p_value(paired)} "
+                    f"| {paired['n_pairs'] if paired else '—'} "
+                    f"| {self._format_significance(paired)} |"
+                )
+
+                warning = self._metric_warning(bench_name, metric_name, entry)
+                if warning:
+                    warnings.append(warning)
+
+        summary = comparison.get("summary")
+        if summary:
+            lines.append("\n### Summary\n")
+            lines.append(
+                f"- {summary.get('improvements', 0)} of {summary.get('total_metrics', 0)} "
+                f"metrics improved, {summary.get('regressions', 0)} regressed."
+            )
+            lines.append(
+                "- This tally weights every metric equally, counts an unchanged metric as a "
+                "regression, and ignores whether any individual change is distinguishable "
+                "from noise. Read the table above, not this line."
+            )
+
+        if warnings:
+            lines.append("\n### Measurement warnings\n")
+            lines.extend(f"- {warning}" for warning in warnings)
+
+        return lines
+
+    @staticmethod
+    def _dataset_lines(results: dict[str, Any]) -> list[str]:
+        """
+        Report properties of the evaluation set itself.
+
+        These describe the data, not the models, so they are identical for both
+        and belong outside the comparison. A reference that does not parse
+        cannot be matched by any correct generation.
+        """
+        rows = []
+        for model_key in ("base", "finetuned"):
+            for bench_name, bench in results.get(model_key, {}).get("benchmarks", {}).items():
+                if "reference_parse_rate" not in bench:
+                    continue
+                rows.append(
+                    (bench_name, bench.get("num_examples", "—"), bench["reference_parse_rate"])
+                )
+                break
+        if not rows:
+            return []
+
+        lines = ["\n## Evaluation Set Diagnostics\n"]
+        lines.append("| Benchmark | Examples | Reference parse rate |")
+        lines.append("|-----------|----------|----------------------|")
+        for bench_name, n_examples, parse_rate in sorted(set(rows)):
+            lines.append(f"| {bench_name} | {n_examples} | {parse_rate:.4f} |")
+
+        broken = [(name, rate) for name, _n, rate in rows if rate < 1.0]
+        for name, rate in sorted(set(broken)):
+            lines.append(
+                f"\n> **Warning:** {(1 - rate):.1%} of `{name}` references are not parseable "
+                f"Python. Those examples cap every match-based metric below 1.0 regardless "
+                f"of model quality."
+            )
+        return lines
 
     def _write_markdown_report(self, results: dict[str, Any], path: Path) -> None:
         """Write a detailed markdown evaluation report."""
@@ -244,12 +402,12 @@ class ModelEvaluator:
                 lines.append("| Metric | Value |")
                 lines.append("|--------|-------|")
                 for metric, value in bench_data.get("metrics", {}).items():
-                    lines.append(f"| {metric} | {value:.4f} |")
+                    lines.append(f"| {metric} | {self._format_value(value)} |")
+
+        lines.extend(self._dataset_lines(results))
 
         if "comparison" in results:
-            lines.append("\n## Statistical Comparison\n")
-            for key, value in results["comparison"].items():
-                lines.append(f"- **{key}**: {value}")
+            lines.extend(self._comparison_lines(results["comparison"]))
 
         with open(path, "w") as f:
             f.write("\n".join(lines))
