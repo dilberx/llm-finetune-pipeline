@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,19 @@ def load_training_data(config: PipelineConfig, tokenizer) -> tuple:
         train_dataset = train_dataset.select(
             range(min(config.dataset.max_samples, len(train_dataset)))
         )
+        if eval_dataset:
+            eval_dataset = eval_dataset.select(
+                range(min(config.dataset.max_samples, len(eval_dataset)))
+            )
+
+    # Mid-training eval exists to pick a checkpoint, not to benchmark, and
+    # eval_loss is a mean over tokens that settles long before the full split
+    # is consumed. Capping it decouples how often you can afford to evaluate
+    # from how much held-out data was curated.
+    if eval_dataset is not None and config.dataset.max_eval_samples:
+        eval_dataset = eval_dataset.select(
+            range(min(config.dataset.max_eval_samples, len(eval_dataset)))
+        )
 
     console.print(f"  Train samples: {len(train_dataset)}")
     if eval_dataset:
@@ -183,7 +197,7 @@ def build_training_args(config: PipelineConfig) -> SFTConfig:
     """Build SFT training arguments from pipeline config."""
     tc = config.training
 
-    return SFTConfig(
+    args = dict(
         output_dir=tc.output_dir,
         num_train_epochs=tc.num_train_epochs,
         per_device_train_batch_size=tc.per_device_train_batch_size,
@@ -194,7 +208,6 @@ def build_training_args(config: PipelineConfig) -> SFTConfig:
         warmup_ratio=tc.warmup_ratio,
         weight_decay=tc.weight_decay,
         max_grad_norm=tc.max_grad_norm,
-        max_seq_length=tc.max_seq_length,
         logging_steps=tc.logging_steps,
         eval_strategy="steps",
         eval_steps=tc.eval_steps,
@@ -214,8 +227,15 @@ def build_training_args(config: PipelineConfig) -> SFTConfig:
         run_name=tc.run_name,
         seed=config.hardware.seed,
         dataset_text_field=config.dataset.text_field,
-        packing=True,  # Pack multiple short samples into one sequence
+        packing=tc.packing,
     )
+    length_arg = (
+        "max_length"
+        if "max_length" in signature(SFTConfig.__init__).parameters
+        else "max_seq_length"
+    )
+    args[length_arg] = tc.max_seq_length
+    return SFTConfig(**args)
 
 
 # Checkpoint management is in its own module (no GPU deps → testable in CI)

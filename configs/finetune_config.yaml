@@ -39,21 +39,29 @@ lora:
 training:
   output_dir: "./checkpoints"
   num_train_epochs: 3
-  per_device_train_batch_size: 4
-  per_device_eval_batch_size: 4
-  gradient_accumulation_steps: 4  # effective batch size = 4 * 4 = 16
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 4  # effective batch size = 2 * 4 = 8
   learning_rate: 2.0e-4
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.05
   weight_decay: 0.01
   max_grad_norm: 1.0
-  max_seq_length: 2048
+  max_seq_length: 1024
 
   # --- Logging ---
   logging_steps: 10
-  eval_steps: 100
-  save_steps: 200
-  save_total_limit: 3
+
+  # Checkpoint interval follows Young/Daly: T = sqrt(2 * save_cost * MTBF).
+  # Measured on this pipeline: ~5 s to write a 121 MB adapter checkpoint, and a
+  # mean time between crashes of ~7.3 h (3 crashes across a 21.8 h run), giving
+  # ~510 s ~= 330 steps. Saving every 2000 steps wasted ~26 min of recompute per
+  # crash. HF requires save_steps to be a multiple of eval_steps when
+  # load_best_model_at_end is set, so the two move together -- which is
+  # affordable only because max_eval_samples caps the eval below.
+  eval_steps: 350
+  save_steps: 350
+  save_total_limit: 10
 
   # --- Performance ---
   bf16: true
@@ -61,9 +69,10 @@ training:
   gradient_checkpointing: true
   dataloader_num_workers: 4
   optim: "paged_adamw_8bit"
+  packing: false
 
   # --- Tracking ---
-  report_to: "wandb"             # "wandb", "tensorboard", or "none"
+  report_to: "none"              # "tensorboard" or "none"
   run_name: "qwen2.5-coder-1.5b-code-lora"
 
 # --- Dataset ---
@@ -73,6 +82,7 @@ dataset:
   eval_path: "./data/curated/eval.jsonl"
   text_field: "text"
   max_samples: null              # null = use all samples
+  max_eval_samples: 500          # caps mid-training eval only; null = full split
 
 # --- Hardware ---
 hardware:

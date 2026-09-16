@@ -74,8 +74,9 @@ class TrainingConfig:
     gradient_checkpointing: bool = True
     dataloader_num_workers: int = 4
     optim: str = "paged_adamw_8bit"
-    report_to: str = "wandb"
+    report_to: str = "none"
     run_name: str = "qwen2.5-coder-1.5b-code-lora"
+    packing: bool = False
 
 
 @dataclass
@@ -86,6 +87,10 @@ class DatasetConfig:
     eval_path: str = "./data/curated/eval.jsonl"
     text_field: str = "text"
     max_samples: int | None = None
+    # Caps the eval split alone. `max_samples` scales both splits together, so
+    # without this the only way to shorten a mid-training eval is to throw away
+    # training data with it.
+    max_eval_samples: int | None = None
 
 
 @dataclass
