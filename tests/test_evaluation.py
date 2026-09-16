@@ -1082,3 +1082,42 @@ class TestCalibration:
         }
         with pytest.raises(ValueError, match="at least 5 models"):
             calibrate(scored, metric="ast_match")
+
+
+class TestPoolTaskFiltering:
+    """
+    PPI estimates the mean over the pool, so a pool whose distribution differs
+    from the gold set's silently changes the estimand.
+    """
+
+    def _mixed(self, tmp_path):
+        path = tmp_path / "mixed.jsonl"
+        rows = [
+            '{"text": "<|im_start|>assistant\\na<|im_end|>", "task": "code_completion"}',
+            '{"text": "<|im_start|>assistant\\nb<|im_end|>", "task": "code_explanation"}',
+            '{"text": "<|im_start|>assistant\\nc<|im_end|>", "task": "raw"}',
+            '{"text": "<|im_start|>assistant\\nd<|im_end|>", "task": "code_completion"}',
+        ]
+        path.write_text("\n".join(rows) + "\n")
+        return path
+
+    def test_unfiltered_pool_keeps_every_task(self, tmp_path):
+        assert len(load_pool(self._mixed(tmp_path))) == 4
+
+    def test_filter_keeps_only_the_matching_task(self, tmp_path):
+        pool = load_pool(self._mixed(tmp_path), task="code_completion")
+        assert [e.completion for e in pool] == ["a", "d"]
+
+    def test_limit_counts_kept_rows_not_read_rows(self, tmp_path):
+        """Reading must continue past skipped rows to reach the limit."""
+        pool = load_pool(self._mixed(tmp_path), limit=2, task="code_completion")
+        assert len(pool) == 2
+
+    def test_unknown_task_yields_empty_pool(self, tmp_path):
+        assert load_pool(self._mixed(tmp_path), task="nonexistent") == []
+
+    def test_rows_without_a_task_field_are_filtered_out(self, tmp_path):
+        path = tmp_path / "p.jsonl"
+        path.write_text('{"prompt": "a", "completion": "b"}\n')
+        assert load_pool(path, task="code_completion") == []
+        assert len(load_pool(path)) == 1

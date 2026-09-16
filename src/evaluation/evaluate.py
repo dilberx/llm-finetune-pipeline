@@ -146,6 +146,7 @@ class ModelEvaluator:
             self._pool_cache = load_pool(
                 self.ppi_config["pool_path"],
                 limit=self.ppi_config.get("max_pool_samples", 2000),
+                task=self.ppi_config.get("pool_task"),
             )
         return self._pool_cache
 

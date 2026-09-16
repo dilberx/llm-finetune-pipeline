@@ -69,7 +69,11 @@ def split_chatml(text: str) -> PoolExample | None:
     return PoolExample(prompt=prompt + _ASSISTANT_MARKER, completion=completion)
 
 
-def load_pool(path: str | Path, limit: int | None = None) -> list[PoolExample]:
+def load_pool(
+    path: str | Path,
+    limit: int | None = None,
+    task: str | None = None,
+) -> list[PoolExample]:
     """
     Load unlabelled examples to be proxy-scored.
 
@@ -79,9 +83,16 @@ def load_pool(path: str | Path, limit: int | None = None) -> list[PoolExample]:
     a pool is a convenience, and one malformed line should not cost an
     evaluation.
 
+    `task` matters more than it looks. PPI estimates the mean over *the pool*,
+    so a pool drawn from a different distribution than the gold set answers a
+    different question. The curated splits mix completion, explanation and raw
+    rows; leaving them mixed while the gold set is completions-only silently
+    changes the estimand.
+
     Args:
         path: JSONL file to read.
         limit: Stop after this many usable examples. None reads all.
+        task: Keep only rows whose `task` field equals this. None keeps all.
 
     Returns:
         Examples in file order.
@@ -95,6 +106,9 @@ def load_pool(path: str | Path, limit: int | None = None) -> list[PoolExample]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
+                continue
+
+            if task is not None and row.get("task") != task:
                 continue
 
             prompt = row.get("prompt", row.get("input"))

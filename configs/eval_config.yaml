@@ -72,6 +72,10 @@ hardware:
 ppi:
   enabled: true
   pool_path: "./data/curated/eval.jsonl"
+  # The curated split mixes task types. PPI estimates the mean over the pool,
+  # so the pool must match the gold set's distribution or it answers a
+  # different question than the one being asked.
+  pool_task: "code_completion"
   max_pool_samples: 2000
   max_length: 1024
   metric: "token_f1"
