@@ -39,9 +39,14 @@ lora:
 training:
   output_dir: "./checkpoints"
   num_train_epochs: 3
-  per_device_train_batch_size: 2
-  per_device_eval_batch_size: 2
-  gradient_accumulation_steps: 4  # effective batch size = 2 * 4 = 8
+  # A cold start peaks higher than a mid-schedule resume: at 2 x 4 the run
+  # pinned 10.0 of 10.2 GB and the paged optimizer thrashed, holding 100% GPU
+  # at 7.2 s/it with no progress past step 24. Halving the micro-batch halves
+  # activation memory; doubling accumulation keeps the effective batch at 8, so
+  # the optimization trajectory is unchanged.
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8  # effective batch size = 1 * 8 = 8
   learning_rate: 2.0e-4
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.05
@@ -69,7 +74,10 @@ training:
   gradient_checkpointing: true
   dataloader_num_workers: 4
   optim: "paged_adamw_8bit"
-  packing: false
+  # Median example is ~157 tokens against a 1024 window, so most of each
+  # sequence is padding. Packing concatenates short examples to fill the
+  # window, trading a larger per-step token count for far fewer steps.
+  packing: true
 
   # --- Tracking ---
   report_to: "none"              # "tensorboard" or "none"

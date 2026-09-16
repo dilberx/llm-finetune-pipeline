@@ -44,21 +44,28 @@ PYTHON ?= $(shell if [ -x venv/bin/python ]; then echo venv/bin/python; \
 	elif command -v python >/dev/null 2>&1; then echo python; \
 	else echo python3; fi)
 
+# Minimum free VRAM before a GPU load test. Override per invocation:
+#   make train PREFLIGHT_MIN_FREE=8000
+PREFLIGHT_MIN_FREE ?= 9000
+
+gpu-preflight: ## Verify the GPU is free enough for a load test
+	@scripts/gpu_preflight.sh $(PREFLIGHT_MIN_FREE)
+
 # --- Pipeline Stages ---
 
 curate: ## Run data curation pipeline
 	$(PYTHON) -m src.data.curate --config configs/data_config.yaml
 
-train: ## Run fine-tuning
+train: gpu-preflight ## Run fine-tuning
 	$(PYTHON) -m src.training.finetune --config configs/finetune_config.yaml
 
-train-resume: ## Resume training from latest checkpoint
+train-resume: gpu-preflight ## Resume training from latest checkpoint
 	$(PYTHON) -m src.training.finetune --config configs/finetune_config.yaml --resume-from auto
 
-eval: ## Run evaluation
+eval: gpu-preflight ## Run evaluation
 	$(PYTHON) -m src.evaluation.evaluate --config configs/eval_config.yaml
 
-sweep: ## Score checkpoints and calibrate the eval set (IRT)
+sweep: gpu-preflight ## Score checkpoints and calibrate the eval set (IRT)
 	$(PYTHON) -m src.evaluation.sweep --config configs/eval_config.yaml
 
 serve: ## Start model server
