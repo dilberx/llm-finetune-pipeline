@@ -66,9 +66,43 @@ Two evaluations were run: one on the target code distribution, one on generic be
 
 **What this means**: The adapter improved on the target code distribution — lower perplexity and better token overlap on completions. Generic prose perplexity got worse, which is expected when you specialize a model on code. The HumanEval sample is too small (3 problems) to draw conclusions from. This is a directional signal on a small eval set, not a definitive benchmark result.
 
-> **Correction:** the exact-match figure above says nothing about the model. Every reference in the eval set is wrapped in markdown code fences, so a model emitting character-perfect code still scores 0.00 unless it also reproduces the fence markers. Scoring the references against themselves confirms the ceiling is zero: `exact_match` 0/16, while AST-based equivalence scores 16/16 on the same input. The pipeline now reports `ast_match`, `ast_alpha_match`, and `parse_rate` alongside it, and flags a metric as *degenerate* when every example scores identically under both models.
+> **Superseded — see the 200-example results below.** The table above comes from a
+> 16-example evaluation, which was too small to resolve the effects that matter. Every
+> metric it reported as zero-for-both turned out to be rare rather than absent: `ast_match`
+> read 0/16 for both models, then 15/200 at p=0.0001 on a larger set.
 >
-> A related defect in the synthesis templates left roughly 70% of generated training prompts syntactically invalid (a docstring indented to a fixed 4 spaces regardless of whether the function was a method). That is fixed, and curation now aborts when too many synthesized examples fail to parse. **The numbers in this section predate both fixes and have not been regenerated.**
+> `exact_match` is also confounded rather than broken. Every reference is wrapped in
+> markdown code fences, so it scores correct code as a miss unless the fence markers are
+> reproduced too — it measures format alongside correctness. It is not a hard ceiling:
+> the fine-tuned model produced 2 exact matches in 200.
+>
+> A separate defect in the synthesis templates left roughly 70% of generated training
+> prompts syntactically invalid (a docstring indented to a fixed 4 spaces regardless of
+> whether the function was a method). That is fixed, and curation now aborts when too many
+> synthesized examples fail to parse. **The numbers above predate that fix.**
+
+### 200-example evaluation
+
+Run on 200 held-out completions with a disjoint 600-example proxy pool. Same adapter, same
+base model; a larger and more informative eval set.
+
+| Metric | Base | Fine-tuned | Δ | 95% CI | p |
+|--------|------|-----------|---|--------|---|
+| Parse rate | 0.235 | **0.810** | +0.575 | [+0.500, +0.650] | <0.0001 |
+| Token F1 | 0.214 | 0.492 | +0.278 | [+0.244, +0.313] | <0.0001 |
+| Edit similarity | 0.088 | 0.357 | +0.269 | [+0.231, +0.308] | <0.0001 |
+| AST match | 0.000 | 0.075 | +0.075 | [+0.040, +0.115] | 0.0001 |
+| Exact match | 0.000 | 0.010 | +0.010 | [+0.000, +0.025] | 0.157 (n.s.) |
+
+**What this means**: the dominant effect is that the fine-tuned model produces *parseable,
+correctly formatted Python*. The base model manages it under a quarter of the time —
+answering in prose, or in one case in Java. Structural correctness improves too, but
+remains rare at 7.5%. Generic Wikitext perplexity still regresses; specializing on code
+costs general language modeling.
+
+A prediction-powered estimate over the disjoint pool puts the token-F1 effect at +0.303
+[+0.276, +0.331], with the cheap proxy correlating at r=0.69 — the 200 generated examples
+carry the statistical weight of about 308.
 
 ## Quick Start
 

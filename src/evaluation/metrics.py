@@ -193,8 +193,10 @@ def paired_difference(
     normality is an assumption rather than an observation.
 
     When every per-example difference is zero the comparison is flagged
-    degenerate: the metric cannot distinguish these models on this set at any
-    sample size, which is a statement about the metric, not the models.
+    degenerate. That means the sample could not resolve a difference, not that
+    none exists: a rare-but-real effect looks identical to no effect until the
+    sample is large enough to catch it. The returned note carries a rule-of-three
+    bound so the result reads as unresolved rather than as a ceiling.
 
     Args:
         base_scores: Base model score per example.
@@ -234,8 +236,10 @@ def paired_difference(
             "significant": False,
             "degenerate": True,
             "note": (
-                "every example scored identically under both models; this metric "
-                "cannot separate them on this set at any sample size"
+                f"no discordant pairs across {n} examples, so this sample cannot "
+                f"resolve a difference. That bounds the effect rather than excluding "
+                f"it: by the rule of three, a true difference up to about {3 / n:.1%} "
+                f"remains consistent with these data"
             ),
         }
 

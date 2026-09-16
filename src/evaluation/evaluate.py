@@ -393,17 +393,20 @@ class ModelEvaluator:
         """
         Return a warning when a metric cannot support the claim it looks like.
 
-        A degenerate metric is the case worth shouting about: it reports a
-        clean-looking 0.0000 difference that is a property of the metric, not
-        of the models, and no sample size will change it.
+        A degenerate metric reports a clean-looking 0.0000 difference that says
+        the sample could not resolve one -- not that none exists. A rare effect
+        is indistinguishable from no effect until the sample is large enough to
+        catch it, so the warning gives the bound rather than declaring a ceiling.
         """
         paired = entry.get("paired")
         if paired and paired.get("degenerate"):
+            n_pairs = paired["n_pairs"]
             return (
                 f"`{bench_name}.{metric_name}` scored every example identically under both "
-                f"models across {paired['n_pairs']} pairs. This metric cannot separate them "
-                f"on this set at any sample size — treat it as a measurement ceiling, not a "
-                f"null result."
+                f"models across {n_pairs} pairs, so this sample cannot resolve a difference. "
+                f"By the rule of three a true effect up to about {3 / n_pairs:.1%} is still "
+                f"consistent with these data — read it as unresolved at this sample size, "
+                f"not as a measurement ceiling."
             )
         if paired and not paired.get("significant"):
             return (

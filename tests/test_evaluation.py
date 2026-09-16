@@ -194,7 +194,9 @@ class TestPairedDifference:
         assert result["degenerate"] is True
         assert result["significant"] is False
         assert result["p_value"] == 1.0
-        assert "cannot separate them" in result["note"]
+        assert "cannot resolve a difference" in result["note"]
+        # 3/16 = 18.8%: a rare effect is entirely consistent with 0/16.
+        assert "18.8%" in result["note"]
 
     def test_clear_improvement_is_significant(self):
         base = [0.1, 0.12, 0.09, 0.11, 0.10, 0.13, 0.08, 0.12]
@@ -692,11 +694,25 @@ class TestReportFormatting:
 
 
 class TestMeasurementWarnings:
-    def test_degenerate_metric_is_called_a_ceiling_not_a_null_result(self):
+    def test_degenerate_metric_is_reported_as_unresolved_not_as_a_ceiling(self):
+        """
+        ast_match read 0/16 for both models, then 15/200 at p=0.0001. Declaring
+        a ceiling from an all-identical sample turns a sampling limit into a
+        false claim about the metric.
+        """
         entry = {"paired": {"degenerate": True, "n_pairs": 16}}
         warning = ModelEvaluator._metric_warning("code_completion", "exact_match", entry)
-        assert "measurement ceiling" in warning
-        assert "any sample size" in warning
+        assert "cannot resolve a difference" in warning
+        assert "not as a measurement ceiling" in warning
+        assert "18.8%" in warning
+
+    def test_degenerate_bound_tightens_with_sample_size(self):
+        small = ModelEvaluator._metric_warning(
+            "b", "m", {"paired": {"degenerate": True, "n_pairs": 16}})
+        large = ModelEvaluator._metric_warning(
+            "b", "m", {"paired": {"degenerate": True, "n_pairs": 200}})
+        assert "18.8%" in small
+        assert "1.5%" in large
 
     def test_inconclusive_metric_is_flagged(self):
         entry = {"paired": {"degenerate": False, "significant": False, "n_pairs": 16,

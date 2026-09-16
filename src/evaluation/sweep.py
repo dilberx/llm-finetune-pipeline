@@ -229,7 +229,9 @@ def _render(payload: dict[str, Any]) -> None:
     if degenerate:
         console.print(
             f"\n[yellow]{degenerate} of {total} items are degenerate: every checkpoint "
-            f"scored them identically, so they measure nothing at any sample size.[/yellow]"
+            f"scored them identically, so they carry no information about "
+            f"the checkpoints scored here. A wider ability range may separate them."
+            f"[/yellow]"
         )
 
 
