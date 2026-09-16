@@ -13,7 +13,8 @@ import json
 import math
 import re
 import subprocess
-import tempfile
+from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ import numpy as np
 import torch
 from rich.console import Console
 from rich.progress import track
+
+from .code_equivalence import alpha_equivalent, ast_equivalent, is_parseable
 
 console = Console()
 
@@ -189,7 +192,7 @@ class PerplexityBenchmark:
             with open(self.dataset_name) as f:
                 text = f.read()
 
-        encodings = tokenizer(text, return_tensors="pt")
+        encodings = tokenizer(text, return_tensors="pt", verbose=False)
         seq_len = encodings.input_ids.size(1)
 
         nlls = []
@@ -236,8 +239,15 @@ class CodeCompletionBenchmark:
     """
     Custom code completion evaluation on held-out examples.
 
-    Measures exact match and BLEU-like similarity between
-    generated and reference completions.
+    Scores each completion on a ladder of strictness, from character equality
+    up to structural equivalence of the parse tree. The looser rungs exist
+    because exact match saturates at zero on small sets: a model can be
+    reliably close and still never reproduce a reference character for
+    character, which reads as a null result when it is really a ceiling in the
+    metric.
+
+    Also reports `parse_rate`, separating wrong code from unparseable code, and
+    `reference_parse_rate`, which describes the eval set rather than the model.
     """
 
     def __init__(
@@ -250,21 +260,48 @@ class CodeCompletionBenchmark:
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 
+    @staticmethod
+    def _normalize_completion(text: str) -> str:
+        """Normalize whitespace without changing code structure."""
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        return "\n".join(line.rstrip() for line in lines).strip()
+
+    @staticmethod
+    def _tokenize_for_similarity(text: str) -> list[str]:
+        """Tokenize code-like text while keeping punctuation as separate tokens."""
+        return re.findall(r"\w+|[^\w\s]", text)
+
     def _compute_token_overlap(self, generated: str, reference: str) -> float:
-        """Simple token-level F1 score between generated and reference."""
-        gen_tokens = set(generated.split())
-        ref_tokens = set(reference.split())
+        """Compute multiset token-level F1 between generated and reference text."""
+        gen_tokens = Counter(self._tokenize_for_similarity(generated))
+        ref_tokens = Counter(self._tokenize_for_similarity(reference))
 
         if not gen_tokens or not ref_tokens:
             return 0.0
 
         overlap = gen_tokens & ref_tokens
-        precision = len(overlap) / len(gen_tokens) if gen_tokens else 0
-        recall = len(overlap) / len(ref_tokens) if ref_tokens else 0
+        overlap_count = sum(overlap.values())
+        gen_count = sum(gen_tokens.values())
+        ref_count = sum(ref_tokens.values())
+
+        precision = overlap_count / gen_count if gen_count else 0
+        recall = overlap_count / ref_count if ref_count else 0
 
         if precision + recall == 0:
             return 0.0
         return 2 * precision * recall / (precision + recall)
+
+    def _normalized_exact_match(self, generated: str, reference: str) -> bool:
+        """Return whether generated text matches after conservative whitespace cleanup."""
+        return self._normalize_completion(generated) == self._normalize_completion(reference)
+
+    def _edit_similarity(self, generated: str, reference: str) -> float:
+        """Return SequenceMatcher ratio after normalization."""
+        return SequenceMatcher(
+            None,
+            self._normalize_completion(generated),
+            self._normalize_completion(reference),
+        ).ratio()
 
     def run(self, model, tokenizer) -> dict[str, Any]:
         """Run code completion evaluation."""
@@ -279,7 +316,14 @@ class CodeCompletionBenchmark:
                 examples.append(json.loads(line))
 
         exact_matches = 0
+        normalized_exact_matches = 0
+        ast_matches = 0
+        alpha_matches = 0
+        parseable_generations = 0
+        parseable_references = 0
         f1_scores = []
+        edit_scores = []
+        raw_results = []
 
         for ex in track(examples, description="  Code completions...", console=console):
             prompt = ex.get("prompt", ex.get("input", ""))
@@ -299,18 +343,60 @@ class CodeCompletionBenchmark:
                 skip_special_tokens=True,
             ).strip()
 
-            # Exact match
-            if generated.strip() == reference.strip():
+            exact_match = generated.strip() == reference.strip()
+            if exact_match:
                 exact_matches += 1
 
-            # Token F1
-            f1_scores.append(self._compute_token_overlap(generated, reference))
+            normalized_exact = self._normalized_exact_match(generated, reference)
+            if normalized_exact:
+                normalized_exact_matches += 1
+
+            # Structural comparison: fences stripped and fragments parsed, so
+            # naming and formatting stop masquerading as correctness errors.
+            ast_match = ast_equivalent(generated, reference)
+            alpha_match = alpha_equivalent(generated, reference)
+            if ast_match:
+                ast_matches += 1
+            if alpha_match:
+                alpha_matches += 1
+
+            generation_parses = is_parseable(generated)
+            if generation_parses:
+                parseable_generations += 1
+            if is_parseable(reference):
+                parseable_references += 1
+
+            token_f1 = self._compute_token_overlap(generated, reference)
+            edit_similarity = self._edit_similarity(generated, reference)
+            f1_scores.append(token_f1)
+            edit_scores.append(edit_similarity)
+            raw_results.append({
+                "prompt": prompt,
+                "reference": reference,
+                "generated": generated,
+                "exact_match": exact_match,
+                "normalized_exact_match": normalized_exact,
+                "ast_match": ast_match,
+                "ast_alpha_match": alpha_match,
+                "parses": generation_parses,
+                "token_f1": token_f1,
+                "edit_similarity": edit_similarity,
+            })
 
         n = len(examples)
         return {
             "metrics": {
                 "exact_match": exact_matches / n if n > 0 else 0,
+                "normalized_exact_match": normalized_exact_matches / n if n > 0 else 0,
+                "ast_match": ast_matches / n if n > 0 else 0,
+                "ast_alpha_match": alpha_matches / n if n > 0 else 0,
+                "parse_rate": parseable_generations / n if n > 0 else 0,
                 "token_f1": float(np.mean(f1_scores)) if f1_scores else 0,
+                "edit_similarity": float(np.mean(edit_scores)) if edit_scores else 0,
             },
+            # A dataset property, not a model score: it is identical for every
+            # model and flags a broken eval set rather than a weak model.
+            "reference_parse_rate": parseable_references / n if n > 0 else 0,
             "num_examples": n,
+            "raw_results": raw_results,
         }
