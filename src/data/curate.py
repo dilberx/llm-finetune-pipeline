@@ -18,6 +18,7 @@ import ast
 import json
 import hashlib
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -27,7 +28,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 
 from .dedup import MinHashDeduplicator
-from .synthesize import InstructionSynthesizer
+from .synthesize import InstructionSynthesizer, validate_example
 
 console = Console()
 
@@ -206,10 +207,15 @@ class DataCurationPipeline:
         else:
             self.synthesizer = None
 
-    def _ingest_sources(self) -> Iterator[dict[str, Any]]:
-        """Load raw code samples from configured sources."""
-        sources = self.config.get("sources", [])
+        # Synthesis can silently emit unparseable examples when a template and
+        # the indentation of its source disagree. Validating here turns that
+        # into a failed run rather than a model trained on broken code.
+        self.validate_synthesis = self.synthesis_config.get("validate", True)
+        self.max_invalid_ratio = self.synthesis_config.get("max_invalid_ratio", 0.02)
+        self.synthesis_stats: dict[str, Any] = {}
 
+    def _iter_sources(self, sources: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+        """Yield raw code samples from a list of HuggingFace dataset sources."""
         for source in sources:
             dataset_name = source["name"]
             subset = source.get("subset")
@@ -227,7 +233,6 @@ class DataCurationPipeline:
                     subset,
                     split=split,
                     streaming=streaming,
-                    trust_remote_code=True,
                 )
             except Exception as e:
                 console.print(f"[red]Failed to load {dataset_name}: {e}[/red]")
@@ -249,6 +254,18 @@ class DataCurationPipeline:
                     count += 1
 
             console.print(f"  [green]Loaded {count} samples[/green]")
+
+    def _ingest_sources(self) -> Iterator[dict[str, Any]]:
+        """Load raw code samples from configured primary sources or fallbacks."""
+        yielded = 0
+        for sample in self._iter_sources(self.config.get("sources", [])):
+            yielded += 1
+            yield sample
+
+        if yielded == 0 and self.config.get("fallback_sources"):
+            console.print("\n[yellow]No primary source samples loaded; trying fallbacks...[/yellow]")
+            for sample in self._iter_sources(self.config["fallback_sources"]):
+                yield sample
 
     def _filter_batch(self, samples: list[dict]) -> list[dict]:
         """Apply quality filters to a batch of samples."""
@@ -276,6 +293,7 @@ class DataCurationPipeline:
 
         console.print("\n[bold blue]Synthesizing instruction examples...[/bold blue]")
         synthesized = []
+        rejected: Counter = Counter()
 
         with Progress(
             SpinnerColumn(),
@@ -289,11 +307,64 @@ class DataCurationPipeline:
 
             for sample in samples:
                 examples = self.synthesizer.synthesize(sample["content"])
-                synthesized.extend(examples)
+                if self.validate_synthesis:
+                    for example in examples:
+                        if validate_example(example):
+                            synthesized.append(example)
+                        else:
+                            rejected[example.get("task", "raw")] += 1
+                else:
+                    synthesized.extend(examples)
                 progress.update(task, advance=1)
 
-        console.print(f"  Generated {len(synthesized)} instruction examples from {len(samples)} samples")
+        console.print(
+            f"  Generated {len(synthesized)} instruction examples from {len(samples)} samples"
+        )
+
+        if self.validate_synthesis:
+            self._report_synthesis_validity(len(synthesized), rejected)
+
         return synthesized
+
+    def _report_synthesis_validity(self, kept: int, rejected: Counter) -> None:
+        """
+        Report syntactic validity of synthesized examples and fail a bad run.
+
+        Rejecting a few examples is normal: real corpora contain code this
+        pipeline cannot cleanly split. A high rate is not noise, it means a
+        template is producing code that does not parse, and every example it
+        touched is teaching the model to write broken Python.
+
+        Raises:
+            RuntimeError: If the invalid share exceeds `max_invalid_ratio`.
+        """
+        n_rejected = sum(rejected.values())
+        total = kept + n_rejected
+        self.synthesis_stats = {
+            "kept": kept,
+            "rejected": n_rejected,
+            "rejected_by_task": dict(rejected),
+            "invalid_ratio": n_rejected / max(total, 1),
+        }
+
+        if not n_rejected:
+            console.print("  [green]All synthesized examples are valid Python[/green]")
+            return
+
+        ratio = self.synthesis_stats["invalid_ratio"]
+        breakdown = ", ".join(f"{task}={count}" for task, count in sorted(rejected.items()))
+        console.print(
+            f"  [yellow]Dropped {n_rejected} unparseable examples "
+            f"({ratio:.2%}) — {breakdown}[/yellow]"
+        )
+
+        if ratio > self.max_invalid_ratio:
+            raise RuntimeError(
+                f"{ratio:.2%} of synthesized examples were not valid Python, above the "
+                f"{self.max_invalid_ratio:.2%} limit ({breakdown}). A synthesis template is "
+                f"likely emitting malformed code. Inspect src/data/synthesize.py, or set "
+                f"synthesis.max_invalid_ratio in the data config if this rate is expected."
+            )
 
     def _export(self, samples: list[dict]) -> tuple[Path, Path]:
         """Split and export samples as JSONL files."""
@@ -346,18 +417,24 @@ class DataCurationPipeline:
         console.print("\n[bold blue]Stage 1: Ingesting data...[/bold blue]")
         raw_samples = list(self._ingest_sources())
         console.print(f"  Total raw samples: {len(raw_samples)}")
+        if not raw_samples:
+            raise RuntimeError("No raw samples loaded from configured sources")
 
         # Stage 2: Quality Filter
         console.print("\n[bold blue]Stage 2: Quality filtering...[/bold blue]")
         filtered = self._filter_batch(raw_samples)
         stats = self.quality_filter.report()
         console.print(f"  Passed: {stats['passed']}/{stats['total']} ({stats['pass_rate']*100:.1f}%)")
+        if not filtered:
+            raise RuntimeError("No samples passed quality filters")
 
         # Stage 3: Deduplicate
         deduped = self._deduplicate(filtered)
 
         # Stage 4: Synthesize instruction examples
         synthesized = self._synthesize(deduped)
+        if not synthesized:
+            raise RuntimeError("No instruction examples were synthesized")
 
         # Stage 5: Export
         train_path, eval_path = self._export(synthesized)
