@@ -146,6 +146,32 @@ calls). About 2.4 GB of the card is held Windows-side throughout. The adapter
 used was the one trained on the pre-fix data, so its output lengths (mean ~50
 tokens) will differ from a new policy's.
 
+### Batched evaluation (`batch_size` in the completion benchmark)
+
+Opt-in and off by default (`configs/eval_config.yaml` sets none). On 24
+completion examples it generated **4.2x** faster at batch 8 (242 s -> 57 s;
+measured under possible contention, see above). It is not 30-50x: that figure is
+for sampling throughput, not for this benchmark.
+
+**Batched greedy output is not identical to unbatched.** 11 of 24 outputs
+differed (13 identical), yet token-F1 was 0.460 against 0.465. Compare numbers
+only within one batch size; do not mix batched and unbatched runs in a table.
+
+The cause is numerical, not a masking bug. Teacher-forced logits against the
+unbatched run, 24 sequences, argmax flips at positions:
+
+| variant | argmax flips | largest flip margin |
+|---------|--------------|---------------------|
+| left-padded batch, correct mask | 1.10% | 0.63 logits |
+| no padding at all, batch shape only | 0.98% | 0.63 logits |
+| pad tokens attended to (deliberate bug) | 17.0% | 17.3 logits |
+
+Padding adds nothing over batch shape alone, and every flip is a near-tie. A
+real masking error looks very different (17x the flip rate, margins in the
+tens). If you change the batching code, rerun that bug control rather than
+trusting a high identical-output count; the control script lived in a scratch
+directory and is not in the repo.
+
 The cost of a policy update has not been measured. SFT on this card ran 6.27 s
 per 8 sequences (~0.78 s per sequence), which would put 8,000 sequences at
 about 1.7 hours of forward/backward per pass; that is an extrapolation, but it
