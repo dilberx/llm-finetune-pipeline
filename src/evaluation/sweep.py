@@ -150,6 +150,7 @@ def score_population(
                 dataset_path=benchmark_config.get("dataset"),
                 max_new_tokens=benchmark_config.get("max_new_tokens", 256),
                 temperature=benchmark_config.get("temperature", 0.2),
+                batch_size=benchmark_config.get("batch_size", 1),
             )
             result = benchmark.run(model, tokenizer)
             raw = result.get("raw_results")

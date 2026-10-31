@@ -10,6 +10,7 @@ import json
 
 import numpy as np
 import pytest
+import torch
 
 from src.evaluation.benchmarks import CodeCompletionBenchmark, _estimate_pass_at_k
 from src.evaluation.code_equivalence import (
@@ -1170,3 +1171,174 @@ class TestProxyPrefixScoring:
         long_completion = list(range(100, 200))
         assert build_scoring_inputs([1], long_completion, max_length=10) is None
         assert build_scoring_inputs([1], long_completion, max_length=10, prefix_tokens=4)
+
+
+class _FakeEncoding(dict):
+    def to(self, device):
+        return self
+
+
+class _FakeTokenizer:
+    """Character-level tokenizer that really pads left or right: id = ord + 2, 0 = pad, 1 = eos."""
+
+    pad_token = "<pad>"
+    pad_token_id = 0
+    eos_token = "<eos>"
+    eos_token_id = 1
+
+    def __init__(self):
+        self.padding_side = "right"
+
+    def __call__(self, text, return_tensors=None, padding=False):
+        texts = [text] if isinstance(text, str) else list(text)
+        rows = [[ord(c) + 2 for c in t] for t in texts]
+        width = max(len(r) for r in rows)
+        ids, masks = [], []
+        for row in rows:
+            pad = width - len(row)
+            if self.padding_side == "left":
+                ids.append([0] * pad + row)
+                masks.append([0] * pad + [1] * len(row))
+            else:
+                ids.append(row + [0] * pad)
+                masks.append([1] * len(row) + [0] * pad)
+        return _FakeEncoding(input_ids=torch.tensor(ids), attention_mask=torch.tensor(masks))
+
+    def decode(self, ids, skip_special_tokens=False):
+        return "".join(chr(int(i) - 2) for i in ids if int(i) > 1)
+
+
+class _FakeModel:
+    """Replies with a function of its own prompt only, so padding must not change it."""
+
+    device = "cpu"
+
+    def __init__(self, tokenizer, fail=False):
+        self.tokenizer = tokenizer
+        self.fail = fail
+        self.calls = []
+
+    def generate(self, input_ids, attention_mask, max_new_tokens, pad_token_id,
+                 do_sample, temperature=None):
+        if self.fail:
+            raise RuntimeError("generation failed")
+        # Right-padded prompts would put the new tokens after a run of pads.
+        assert self.tokenizer.padding_side == "left"
+        self.calls.append(
+            {"batch": input_ids.shape[0], "do_sample": do_sample, "temperature": temperature}
+        )
+        rows = []
+        for ids, mask in zip(input_ids, attention_mask):
+            real = ids[mask.bool()].tolist()
+            reply = list(reversed(real))[: len(real) % 4 + 2]
+            rows.append(reply + [1])
+        width = max(len(r) for r in rows)
+        new = torch.tensor([r + [pad_token_id] * (width - len(r)) for r in rows])
+        return torch.cat([input_ids, new], dim=1)
+
+
+_CC_PROMPTS = [
+    "def a(x):", "def longer_name(first, second):", "x = 1", "class K:",
+    "import os, sys", "def f():", "for i in r:",
+]
+
+
+def _expected_reply(prompt):
+    return prompt[::-1][: len(prompt) % 4 + 2].strip()
+
+
+def _write_cc_dataset(tmp_path):
+    path = tmp_path / "cc.jsonl"
+    rows = [json.dumps({"prompt": p, "completion": "return 1"}) for p in _CC_PROMPTS]
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+class TestBatchedGeneration:
+    def test_batch_size_defaults_to_one(self):
+        assert CodeCompletionBenchmark().batch_size == 1
+
+    def test_batch_size_is_clamped_to_at_least_one(self):
+        assert CodeCompletionBenchmark(batch_size=0).batch_size == 1
+        assert CodeCompletionBenchmark(batch_size=-4).batch_size == 1
+
+    def test_every_index_lands_in_exactly_one_batch(self):
+        batches = CodeCompletionBenchmark._batches_by_length(_CC_PROMPTS, 3)
+        assert sorted(i for b in batches for i in b) == list(range(len(_CC_PROMPTS)))
+        assert all(len(b) <= 3 for b in batches)
+
+    def test_batching_groups_prompts_of_similar_length(self):
+        batches = CodeCompletionBenchmark._batches_by_length(_CC_PROMPTS, 3)
+        lengths = [len(_CC_PROMPTS[i]) for b in batches for i in b]
+        assert lengths == sorted(lengths)
+
+    def test_batch_size_one_keeps_the_original_order(self):
+        batches = CodeCompletionBenchmark._batches_by_length(_CC_PROMPTS, 1)
+        assert [b[0] for b in batches] == list(range(len(_CC_PROMPTS)))
+
+    @pytest.mark.parametrize("batch_size", [1, 3, 7, 50])
+    def test_generations_return_in_input_order(self, batch_size):
+        tokenizer = _FakeTokenizer()
+        model = _FakeModel(tokenizer)
+        benchmark = CodeCompletionBenchmark(batch_size=batch_size)
+        generated = benchmark._generate_all(model, tokenizer, _CC_PROMPTS)
+        assert generated == [_expected_reply(p) for p in _CC_PROMPTS]
+
+    def test_batching_reduces_the_number_of_generate_calls(self):
+        tokenizer = _FakeTokenizer()
+        unbatched, batched = _FakeModel(tokenizer), _FakeModel(tokenizer)
+        CodeCompletionBenchmark(batch_size=1)._generate_all(unbatched, tokenizer, _CC_PROMPTS)
+        CodeCompletionBenchmark(batch_size=3)._generate_all(batched, tokenizer, _CC_PROMPTS)
+        assert len(unbatched.calls) == 7
+        assert len(batched.calls) == 3
+
+    def test_batched_run_matches_unbatched_run(self, tmp_path):
+        path = _write_cc_dataset(tmp_path)
+        results = {}
+        for batch_size in (1, 4):
+            tokenizer = _FakeTokenizer()
+            benchmark = CodeCompletionBenchmark(dataset_path=str(path), batch_size=batch_size)
+            results[batch_size] = benchmark.run(_FakeModel(tokenizer), tokenizer)
+
+        def generated(result):
+            return [r["generated"] for r in result["raw_results"]]
+
+        assert generated(results[1]) == generated(results[4])
+        assert results[1]["metrics"] == results[4]["metrics"]
+        assert [r["prompt"] for r in results[4]["raw_results"]] == _CC_PROMPTS
+
+    def test_padding_side_is_restored(self):
+        tokenizer = _FakeTokenizer()
+        CodeCompletionBenchmark(batch_size=3)._generate_all(
+            _FakeModel(tokenizer), tokenizer, _CC_PROMPTS
+        )
+        assert tokenizer.padding_side == "right"
+
+    def test_padding_side_is_restored_when_generation_fails(self):
+        tokenizer = _FakeTokenizer()
+        with pytest.raises(RuntimeError, match="generation failed"):
+            CodeCompletionBenchmark(batch_size=3)._generate_all(
+                _FakeModel(tokenizer, fail=True), tokenizer, _CC_PROMPTS
+            )
+        assert tokenizer.padding_side == "right"
+
+    def test_missing_pad_token_is_filled_from_eos(self):
+        tokenizer = _FakeTokenizer()
+        tokenizer.pad_token = None
+        CodeCompletionBenchmark()._generate_all(_FakeModel(tokenizer), tokenizer, _CC_PROMPTS[:2])
+        assert tokenizer.pad_token == tokenizer.eos_token
+
+    def test_sampling_passes_the_temperature(self):
+        tokenizer = _FakeTokenizer()
+        model = _FakeModel(tokenizer)
+        CodeCompletionBenchmark(temperature=0.2)._generate_all(model, tokenizer, _CC_PROMPTS[:1])
+        assert model.calls[0]["do_sample"] is True
+        assert model.calls[0]["temperature"] == pytest.approx(0.2)
+
+    def test_zero_temperature_is_greedy_without_a_temperature_argument(self):
+        """A temperature of 0 is not a valid sampling temperature, so it is not passed."""
+        tokenizer = _FakeTokenizer()
+        model = _FakeModel(tokenizer)
+        CodeCompletionBenchmark(temperature=0)._generate_all(model, tokenizer, _CC_PROMPTS[:1])
+        assert model.calls[0]["do_sample"] is False
+        assert model.calls[0]["temperature"] is None

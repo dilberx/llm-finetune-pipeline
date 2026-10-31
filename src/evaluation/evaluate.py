@@ -131,6 +131,7 @@ class ModelEvaluator:
                 dataset_path=cc_config.get("dataset"),
                 max_new_tokens=cc_config.get("max_new_tokens", 256),
                 temperature=cc_config.get("temperature", 0.2),
+                batch_size=cc_config.get("batch_size", 1),
             )
             results["benchmarks"]["code_completion"] = benchmark.run(model, tokenizer)
 
