@@ -29,15 +29,36 @@ it was fine.
 
 `nvidia-smi --query-compute-apps` **returns nothing under WSL2**, even while a
 job holds 9 GB. It is not that the GPU is free; the process list simply is not
-visible. `scripts/gpu_preflight.sh` instead scans `/proc/*/fd` for open
-`/dev/nvidia*` handles, which does work inside the WSL namespace.
+visible. `scripts/gpu_preflight.sh` instead scans `/proc/*/fd` for open GPU
+device handles. **Under WSL2 the GPU is `/dev/dxg`** — `/dev/nvidia*` does not
+exist there. An earlier version of the script scanned only `/dev/nvidia*`, so
+it reported "no GPU processes" while other jobs held the card. Test any change
+to this detection against a process that is actually running, not an idle GPU.
 
-Memory in use with *no* WSL process holding a handle belongs to the Windows
-side — desktop compositor, a browser with hardware acceleration, another CUDA
-app. Roughly 1.8 GB sits there routinely, which is ~18% of the card gone before
-training starts. Nothing inside WSL can release it. The script reports it and
-stops; closing those applications is a human decision, not something a script
-should do on its own.
+Each process is listed with its working directory and uptime, because the
+command line alone does not say whose it is: every project on the machine uses
+`./venv/bin/python`. **Another project on this machine shares the GPU** (for
+example `llm-inference-benchmark`), so check the listed project directories
+before assuming a process is yours.
+
+The script never stops anything. Whether a process is needed is the owner's
+decision.
+
+Memory in use with *no* process visible in WSL belongs to the Windows side —
+desktop compositor, a browser with hardware acceleration, another CUDA app.
+Nothing inside WSL can release it. Earlier notes here put that at "~1.8 GB
+routinely"; that figure came from the broken detection above and is not
+established.
+
+**Use strict mode for anything whose speed you will quote:**
+
+```bash
+PREFLIGHT_STRICT=1 scripts/gpu_preflight.sh 6000
+```
+
+A second process can slow a run by taking compute while leaving plenty of
+memory free, and the free-memory check cannot see that. Strict mode exits 3
+when any other process holds the GPU.
 
 ## Monitoring a long run
 
@@ -79,7 +100,13 @@ exists to pick a checkpoint, not to benchmark.
 
 ## Measured on this hardware
 
-A 1.5B model, 4-bit NF4, LoRA r=16, gradient checkpointing, `paged_adamw_8bit`:
+A 1.5B model, 4-bit NF4, LoRA r=16, gradient checkpointing, `paged_adamw_8bit`.
+
+**Treat every figure in this section as taken under unknown concurrent GPU
+load.** The process detection was broken when these were measured, and another
+project's job was sharing the card at least some of the time. The training
+thrash, the rollout throughput and the batching speedup may all include that
+contention. Re-measure with `PREFLIGHT_STRICT=1` before relying on a number.
 
 | config | free VRAM | rate | outcome |
 |--------|-----------|------|---------|
