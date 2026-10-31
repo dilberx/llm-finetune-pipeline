@@ -93,6 +93,37 @@ rises and on this card that costs far more than the step count saves. **Memory
 is the binding constraint here; evaluate any speed change for its memory effect
 first.**
 
+### Rollout throughput (sampling)
+
+Same 1.5B model on the same card, HF `generate`, 96 new tokens, temperature 0.8,
+64 sequences per call (8 prompts x 8 samples), 2 timed calls per setting:
+
+| config | s/call | sequences/s | peak VRAM |
+|--------|--------|-------------|-----------|
+| 4-bit | 12.2 | 5.3 | 2.7 GB |
+| 4-bit + LoRA | 19.3 | 3.3 | 3.8 GB |
+| bf16 | 6.3 | 10.2 | 4.7 GB |
+| bf16 + LoRA | 12.8 | 5.0 | 5.7 GB |
+
+**Batching is the lever.** One sequence at a time ran 0.09-0.31 sequences/s, so
+batched sampling is roughly 30-50x faster. An unbatched estimate overstates
+rollout cost by that factor: 8,000 sequences take about 27 minutes in bf16 +
+LoRA, not 17 hours. An unmerged LoRA adapter roughly doubles per-step latency
+(~134 ms against ~66 ms per step in bf16), and 4-bit is about half the speed of
+bf16 at the cost of ~2 GB less memory.
+
+Caveats: this is static batching, not continuous batching (vLLM is not
+installed), so a sequence that ends early still occupies its slot until the
+longest one in the batch finishes. The single-sequence rows are noisy (two
+calls). About 2.4 GB of the card is held Windows-side throughout. The adapter
+used was the one trained on the pre-fix data, so its output lengths (mean ~50
+tokens) will differ from a new policy's.
+
+The cost of a policy update has not been measured. SFT on this card ran 6.27 s
+per 8 sequences (~0.78 s per sequence), which would put 8,000 sequences at
+about 1.7 hours of forward/backward per pass; that is an extrapolation, but it
+suggests the update, not sampling, is what dominates.
+
 Beware `train_steps_per_second` in `training_metadata.json`: HF computes it as
 `max_steps / train_runtime`, so for a *resumed* run it divides the full step
 count by the runtime of only the resumed segment. The 0.642 recorded there
