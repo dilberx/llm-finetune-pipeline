@@ -148,14 +148,35 @@ tokens) will differ from a new policy's.
 
 ### Batched evaluation (`batch_size` in the completion benchmark)
 
-Opt-in and off by default (`configs/eval_config.yaml` sets none). On 24
-completion examples it generated **4.2x** faster at batch 8 (242 s -> 57 s;
-measured under possible contention, see above). It is not 30-50x: that figure is
-for sampling throughput, not for this benchmark.
+Opt-in and off by default (`configs/eval_config.yaml` sets none). Measured on
+the 200-example completion set, greedy, 256 new tokens, `checkpoints/best` (the
+adapter trained on pre-fix data), preflight showing no other GPU process:
 
-**Batched greedy output is not identical to unbatched.** 11 of 24 outputs
-differed (13 identical), yet token-F1 was 0.460 against 0.465. Compare numbers
-only within one batch size; do not mix batched and unbatched runs in a table.
+| batch size | seconds | speedup | identical to bs 1 | token_f1 | parse_rate | ast_match |
+|------------|---------|---------|-------------------|----------|------------|-----------|
+| 1  | 2235 | 1.0x | 200/200 | 0.5051 | 0.930 | 0.075 |
+| 2  | 1929 | 1.2x | 116/200 | 0.5049 | 0.925 | 0.075 |
+| 4  | 1362 | 1.6x | 115/200 | 0.5014 | 0.910 | 0.075 |
+| 8  | 866  | 2.6x | 117/200 | 0.5039 | 0.930 | 0.070 |
+| 16 | 559  | 4.0x | 117/200 | 0.5027 | 0.930 | 0.070 |
+
+It is not 30-50x: that figure is for sampling throughput, not for this
+benchmark. An earlier 24-example run showed 4.2x at batch 8, so the speedup
+depends on the prompt-length mix.
+
+**Batched greedy output is not identical to unbatched, but the scores are.**
+Any batch size above 1 changes about 42% of generations. A repeated batch-8 run
+was byte-identical, so this is batch shape, not run-to-run randomness. The
+aggregate spread across batch sizes is small next to sampling error: 0.12 of
+the 95% CI half-width for token_f1, 0.13 for ast_match, but **0.57 for
+parse_rate**, the fragile one. No batch-size change gave a significant paired
+difference. (An n=24 run had suggested a parse_rate gap of 0.75 vs 0.875; at
+n=200 it is 0.02. That was small-sample noise.)
+
+So: compare scores only within one batch size, and do not treat per-example
+outputs as stable across batch sizes — that matters for anything built on
+per-item responses, such as the IRT calibration. Raw runs and the analysis
+script are in `reports/batch_size_sweep/` (gitignored, local only).
 
 The cause is numerical, not a masking bug. Teacher-forced logits against the
 unbatched run, 24 sequences, argmax flips at positions:
@@ -169,8 +190,9 @@ unbatched run, 24 sequences, argmax flips at positions:
 Padding adds nothing over batch shape alone, and every flip is a near-tie. A
 real masking error looks very different (17x the flip rate, margins in the
 tens). If you change the batching code, rerun that bug control rather than
-trusting a high identical-output count; the control script lived in a scratch
-directory and is not in the repo.
+trusting a high identical-output count. The control script lived in a scratch
+directory and is gone; rebuild it from the three rows above (teacher-forced
+logits, one sequence alone against the same sequence inside a padded batch).
 
 The cost of a policy update has not been measured. SFT on this card ran 6.27 s
 per 8 sequences (~0.78 s per sequence), which would put 8,000 sequences at

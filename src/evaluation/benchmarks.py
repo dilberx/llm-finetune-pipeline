@@ -262,8 +262,10 @@ class CodeCompletionBenchmark:
         self.temperature = temperature
         # Generation dominates the cost of this benchmark, and decoding one
         # sequence at a time leaves a 10 GB card almost idle: measured on one,
-        # eight prompts per call raised throughput roughly 30-50x. The default
-        # of 1 reproduces the original one-at-a-time behaviour.
+        # eight prompts per call ran this benchmark about 4x faster. Batched
+        # greedy output is not identical to unbatched (near-tie logits flip
+        # with batch shape), so compare scores only within one batch size. The
+        # default of 1 reproduces the original one-at-a-time behaviour.
         self.batch_size = max(1, int(batch_size))
 
     @staticmethod
