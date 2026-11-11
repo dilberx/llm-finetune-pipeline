@@ -1,0 +1,91 @@
+# ============================================================================
+# Pilot fine-tune on a rented 24 GB GPU
+# ============================================================================
+# Same model, quantization, LoRA and effective batch as finetune_config.yaml,
+# so the adapter is directly comparable with one trained locally. Only the
+# split of the effective batch changes (4 x 2 instead of 1 x 8), which the
+# extra memory allows and which does not change the optimization trajectory.
+#
+# This is a pilot: 20,000 of the 134,098 curated examples, one epoch, ~2,500
+# optimizer steps. It answers whether a subset already gets most of the gain
+# before paying for the full corpus. The curated split is shuffled at curation
+# time, so the first 20,000 rows are a random subset.
+#
+# Run with scripts/cloud_train.sh, not `make train`.
+# ============================================================================
+
+model:
+  name: "Qwen/Qwen2.5-Coder-1.5B"
+  revision: "main"
+  trust_remote_code: true
+  torch_dtype: "bfloat16"
+
+# Kept at 4-bit although 24 GB would fit bf16: the eval loads the base in 4-bit,
+# and an adapter trained against a different base precision is a confound.
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"
+  double_quant: true
+  compute_dtype: "bfloat16"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+training:
+  output_dir: "./checkpoints"
+  num_train_epochs: 1
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 2  # effective batch 4 * 2 = 8, as in the local config
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_length: 1024
+
+  logging_steps: 10
+
+  # ~2,500 steps / 350 = 7 checkpoints, enough for the IRT sweep (needs 5 with
+  # the base model). Must stay a multiple of eval_steps; see tests/test_config.py.
+  eval_steps: 350
+  save_steps: 350
+  save_total_limit: 10
+
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  optim: "paged_adamw_8bit"
+  # Packing was 58 s/it on the 10 GB card because of memory, not compute. It
+  # may well win at 24 GB, but that is unmeasured; the pilot uses the
+  # configuration that is known to train correctly.
+  packing: false
+
+  report_to: "none"
+  run_name: "qwen2.5-coder-1.5b-code-lora-pilot20k"
+
+dataset:
+  name: "curated"
+  curated_path: "./data/curated/train.jsonl"
+  eval_path: "./data/curated/eval.jsonl"
+  text_field: "text"
+  max_samples: 20000
+  max_eval_samples: 500
+
+hardware:
+  device_map: "auto"
+  seed: 42

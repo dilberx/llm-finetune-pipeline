@@ -88,6 +88,14 @@ subdirectory such as `checkpoints/_archive_<date>/` is enough, since the glob is
 not recursive. Resuming a finished run on a new corpus with an exhausted LR
 schedule looks like it is working and produces nonsense.
 
+**Training off this machine.** `scripts/cloud_train.sh` with
+`configs/finetune_cloud.yaml` runs a pilot (20k examples, one epoch, ~2,500
+steps) on a rented 24 GB card. The header of the script has the copy-up and
+copy-back commands. It keeps 4-bit, LoRA and the effective batch of 8 identical
+to the local config so the adapters are comparable, refuses to start over
+existing checkpoints, and runs the preflight in strict mode. Evaluate the
+returned adapters locally; the eval fits here.
+
 **`save_steps` must be a multiple of `eval_steps`** while
 `load_best_model_at_end` is set, which `finetune.py` sets unconditionally. A
 violation fails at Trainer construction, minutes into a run, after model

@@ -102,12 +102,16 @@ class TestCheckpointCadence:
     a run after model loading and tokenization.
     """
 
-    def test_shipped_config_satisfies_the_trainer_constraint(self):
-        config = load_config("configs/finetune_config.yaml")
+    SHIPPED = ["configs/finetune_config.yaml", "configs/finetune_cloud.yaml"]
+
+    @pytest.mark.parametrize("path", SHIPPED)
+    def test_shipped_config_satisfies_the_trainer_constraint(self, path):
+        config = load_config(path)
         assert config.training.save_steps % config.training.eval_steps == 0
 
-    def test_shipped_config_caps_eval(self):
-        config = load_config("configs/finetune_config.yaml")
+    @pytest.mark.parametrize("path", SHIPPED)
+    def test_shipped_config_caps_eval(self, path):
+        config = load_config(path)
         assert config.dataset.max_eval_samples is not None, (
             "frequent eval is only affordable with a capped eval split"
         )
