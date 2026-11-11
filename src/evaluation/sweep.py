@@ -267,6 +267,15 @@ def run_sweep(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
     payload["checkpoints"] = [
         {"name": r.name, "step": r.step, "adapter_path": r.adapter_path} for r in refs
     ]
+    # Every checkpoint here was decoded with the same settings, so the fit is
+    # internally consistent. Recording them is what lets a later sweep be
+    # checked against this one: per-item responses shift with batch size.
+    cc_config = config["benchmarks"]["code_completion"]
+    payload["generation"] = {
+        "batch_size": max(1, int(cc_config.get("batch_size", 1))),
+        "temperature": cc_config.get("temperature", 0.2),
+        "max_new_tokens": cc_config.get("max_new_tokens", 256),
+    }
     return payload
 
 

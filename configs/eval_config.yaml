@@ -42,6 +42,10 @@ benchmarks:
     dataset: "./data/eval/code_completion.jsonl"
     max_new_tokens: 256
     temperature: 0.2
+    # 4x faster than 1 on the 200-example set, with no significant change in
+    # any aggregate score; see AGENTS.md. Per-example outputs do change with
+    # batch size, so keep it fixed across runs you will compare item by item.
+    batch_size: 16
 
 # --- Comparison ---
 comparison:

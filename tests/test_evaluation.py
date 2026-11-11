@@ -1262,6 +1262,14 @@ class TestBatchedGeneration:
         assert CodeCompletionBenchmark(batch_size=0).batch_size == 1
         assert CodeCompletionBenchmark(batch_size=-4).batch_size == 1
 
+    def test_generation_settings_record_the_batch_size(self):
+        benchmark = CodeCompletionBenchmark(batch_size=16, temperature=0.0, max_new_tokens=64)
+        assert benchmark.generation_settings() == {
+            "batch_size": 16,
+            "temperature": 0.0,
+            "max_new_tokens": 64,
+        }
+
     def test_every_index_lands_in_exactly_one_batch(self):
         batches = CodeCompletionBenchmark._batches_by_length(_CC_PROMPTS, 3)
         assert sorted(i for b in batches for i in b) == list(range(len(_CC_PROMPTS)))

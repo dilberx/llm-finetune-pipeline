@@ -148,7 +148,9 @@ tokens) will differ from a new policy's.
 
 ### Batched evaluation (`batch_size` in the completion benchmark)
 
-Opt-in and off by default (`configs/eval_config.yaml` sets none). Measured on
+`configs/eval_config.yaml` sets 16; the code default is 1. Results and sweep
+payloads record the batch size under `generation`. Reports written before this
+was set used 1, so do not compare them item by item with newer ones. Measured on
 the 200-example completion set, greedy, 256 new tokens, `checkpoints/best` (the
 adapter trained on pre-fix data), preflight showing no other GPU process:
 

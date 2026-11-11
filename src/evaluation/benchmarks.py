@@ -268,6 +268,14 @@ class CodeCompletionBenchmark:
         # default of 1 reproduces the original one-at-a-time behaviour.
         self.batch_size = max(1, int(batch_size))
 
+    def generation_settings(self) -> dict[str, Any]:
+        """The decoding settings a result depends on, for recording beside it."""
+        return {
+            "batch_size": self.batch_size,
+            "temperature": self.temperature,
+            "max_new_tokens": self.max_new_tokens,
+        }
+
     @staticmethod
     def _batches_by_length(prompts: list[str], batch_size: int) -> list[list[int]]:
         """
@@ -450,5 +458,8 @@ class CodeCompletionBenchmark:
             # model and flags a broken eval set rather than a weak model.
             "reference_parse_rate": parseable_references / n if n > 0 else 0,
             "num_examples": n,
+            # Batch shape changes about 40% of greedy generations on this model,
+            # so two results are only comparable per example when these match.
+            "generation": self.generation_settings(),
             "raw_results": raw_results,
         }
