@@ -102,7 +102,12 @@ class TestCheckpointCadence:
     a run after model loading and tokenization.
     """
 
-    SHIPPED = ["configs/finetune_config.yaml", "configs/finetune_cloud.yaml"]
+    SHIPPED = [
+        "configs/finetune_config.yaml",
+        "configs/finetune_cloud.yaml",
+        "configs/finetune_pilot_local.yaml",
+        "configs/finetune_early_ladder.yaml",
+    ]
 
     @pytest.mark.parametrize("path", SHIPPED)
     def test_shipped_config_satisfies_the_trainer_constraint(self, path):
