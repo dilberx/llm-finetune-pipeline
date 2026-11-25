@@ -1,0 +1,90 @@
+# Second early ladder for the held-out IRT test: the pre-fix corpus (data/curated/_backup_*) and seed 43, so it is not the same trajectory as finetune_early_ladder.yaml.
+# ============================================================================
+# Early-training ladder: the first 350 steps of the local pilot, saved densely
+# ============================================================================
+# The pilot's sweep showed 93% of its token_f1 gain arrives before step 350,
+# where nothing was saved, so its checkpoints all sit at one ability level and
+# give IRT no ladder. This config is finetune_pilot_local.yaml unchanged --
+# same data, seed and 2,500-step LR schedule -- except that it saves every 10
+# steps into its own directory. Stop it once checkpoint-350 exists; it is not
+# meant to run to the end. scripts/early_ladder.sh does both.
+#
+# A shorter run would not reproduce the pilot: warmup and cosine decay are
+# fractions of the total step count, so the schedule has to stay at 2,500.
+# ============================================================================
+
+model:
+  name: "Qwen/Qwen2.5-Coder-1.5B"
+  revision: "main"
+  trust_remote_code: true
+  torch_dtype: "bfloat16"
+
+# Kept at 4-bit although 24 GB would fit bf16: the eval loads the base in 4-bit,
+# and an adapter trained against a different base precision is a confound.
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"
+  double_quant: true
+  compute_dtype: "bfloat16"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+training:
+  output_dir: "./checkpoints/early_ladder_olddata"
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8  # effective batch 1 * 8 = 8, as in finetune_config.yaml
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_length: 1024
+
+  logging_steps: 10
+
+  # Every 10 steps up to 350: 35 checkpoints, from which the sweep takes a
+  # log-spaced subset. The eval split is cut to 50 below so 35 evals stay cheap.
+  eval_steps: 10
+  save_steps: 10
+  save_total_limit: 40
+
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  optim: "paged_adamw_8bit"
+  # Packing was 58 s/it on the 10 GB card because of memory, not compute. It
+  # may well win at 24 GB, but that is unmeasured; the pilot uses the
+  # configuration that is known to train correctly.
+  packing: false
+
+  report_to: "none"
+  run_name: "qwen2.5-coder-1.5b-code-lora-pilot20k-early-ladder-olddata"
+
+dataset:
+  name: "curated"
+  curated_path: "./data/curated/_backup_20260916-211015/train.jsonl"
+  eval_path: "./data/curated/_backup_20260916-211015/eval.jsonl"
+  text_field: "text"
+  max_samples: 20000
+  max_eval_samples: 50
+
+hardware:
+  device_map: "auto"
+  seed: 43

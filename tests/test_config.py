@@ -107,6 +107,7 @@ class TestCheckpointCadence:
         "configs/finetune_cloud.yaml",
         "configs/finetune_pilot_local.yaml",
         "configs/finetune_early_ladder.yaml",
+        "configs/finetune_early_ladder_olddata.yaml",
     ]
 
     @pytest.mark.parametrize("path", SHIPPED)

@@ -6,8 +6,8 @@
 #         STOP_AT=350 MIN_FREE=7000 scripts/early_ladder.sh
 set -uo pipefail
 
-CONFIG=configs/finetune_early_ladder.yaml
-OUT=checkpoints/early_ladder
+CONFIG="${CONFIG:-configs/finetune_early_ladder.yaml}"
+OUT="${OUT:-checkpoints/early_ladder}"
 STOP_AT="${STOP_AT:-350}"
 # The pilot peaked about 6.8 GB above what Windows held, and froze-style
 # thrashing starts when less than that is free.
