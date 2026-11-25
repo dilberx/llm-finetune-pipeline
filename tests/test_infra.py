@@ -3,23 +3,19 @@ Tests for GPU resource manager, structured logging, metrics, and profiling.
 """
 
 import json
-import os
 import logging
-import tempfile
+import os
 import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from src.utils.gpu import GPUResourceManager, GPUSnapshot, MemoryTracker
-from src.utils.logging import get_logger, set_correlation_id, get_correlation_id, JSONFormatter
+from src.utils.logging import JSONFormatter, get_correlation_id, get_logger, set_correlation_id
 from src.utils.metrics_export import MetricsRegistry, TrainingCostTracker
-
 
 # ============================================================================
 # GPU Resource Manager Tests
 # ============================================================================
+
 
 class TestMemoryTracker:
     def test_peak_tracking(self):
@@ -62,17 +58,27 @@ class TestMemoryTracker:
 class TestGPUSnapshot:
     def test_used_pct(self):
         snap = GPUSnapshot(
-            device_id=0, device_name="RTX 3080", total_mb=10240,
-            used_mb=5120, free_mb=5120, utilization_pct=50,
-            temperature_c=65, power_w=200,
+            device_id=0,
+            device_name="RTX 3080",
+            total_mb=10240,
+            used_mb=5120,
+            free_mb=5120,
+            utilization_pct=50,
+            temperature_c=65,
+            power_w=200,
         )
         assert snap.used_pct == 50.0
 
     def test_to_dict(self):
         snap = GPUSnapshot(
-            device_id=0, device_name="RTX 3080", total_mb=10240,
-            used_mb=5120, free_mb=5120, utilization_pct=50,
-            temperature_c=65, power_w=200,
+            device_id=0,
+            device_name="RTX 3080",
+            total_mb=10240,
+            used_mb=5120,
+            free_mb=5120,
+            utilization_pct=50,
+            temperature_c=65,
+            power_w=200,
         )
         d = snap.to_dict()
         assert d["device_name"] == "RTX 3080"
@@ -84,36 +90,46 @@ class TestGPUResourceManager:
     def test_no_gpu_graceful(self):
         """Should not crash when no GPU is available."""
         manager = GPUResourceManager()
-        snapshot = manager.get_snapshot(device_id=99)
+        manager.get_snapshot(device_id=99)
         # Returns None when device doesn't exist
         # (may return actual data if test machine has GPUs)
 
     def test_recommend_device_map_no_gpu(self):
         manager = GPUResourceManager()
         # Patch to simulate no GPUs
-        with patch.object(manager, 'get_all_snapshots', return_value=[]):
+        with patch.object(manager, "get_all_snapshots", return_value=[]):
             result = manager.recommend_device_map(model_size_mb=5000)
             assert result["strategy"] == "cpu"
 
     def test_recommend_device_map_single_gpu_fits(self):
         manager = GPUResourceManager()
         snap = GPUSnapshot(
-            device_id=0, device_name="RTX 3080", total_mb=10240,
-            used_mb=1000, free_mb=9240, utilization_pct=10,
-            temperature_c=40, power_w=50,
+            device_id=0,
+            device_name="RTX 3080",
+            total_mb=10240,
+            used_mb=1000,
+            free_mb=9240,
+            utilization_pct=10,
+            temperature_c=40,
+            power_w=50,
         )
-        with patch.object(manager, 'get_all_snapshots', return_value=[snap]):
+        with patch.object(manager, "get_all_snapshots", return_value=[snap]):
             result = manager.recommend_device_map(model_size_mb=3000)
             assert result["strategy"] == "single_gpu"
 
     def test_recommend_device_map_single_gpu_insufficient(self):
         manager = GPUResourceManager()
         snap = GPUSnapshot(
-            device_id=0, device_name="RTX 3080", total_mb=10240,
-            used_mb=8000, free_mb=2240, utilization_pct=80,
-            temperature_c=70, power_w=250,
+            device_id=0,
+            device_name="RTX 3080",
+            total_mb=10240,
+            used_mb=8000,
+            free_mb=2240,
+            utilization_pct=80,
+            temperature_c=70,
+            power_w=250,
         )
-        with patch.object(manager, 'get_all_snapshots', return_value=[snap]):
+        with patch.object(manager, "get_all_snapshots", return_value=[snap]):
             result = manager.recommend_device_map(model_size_mb=5000)
             assert result["strategy"] == "offload_cpu"
 
@@ -128,6 +144,7 @@ class TestGPUResourceManager:
 # ============================================================================
 # Structured Logging Tests
 # ============================================================================
+
 
 class TestStructuredLogging:
     def test_get_logger(self):
@@ -146,8 +163,13 @@ class TestStructuredLogging:
     def test_json_formatter(self):
         formatter = JSONFormatter()
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="Test message", args=(), exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Test message",
+            args=(),
+            exc_info=None,
         )
         record.component = "training"
         record.correlation_id = "abc-123"
@@ -202,9 +224,11 @@ class TestStructuredLogging:
 # Checkpoint Fault Tolerance Tests
 # ============================================================================
 
+
 class TestCheckpointFaultTolerance:
     def test_find_latest_checkpoint_empty(self, tmp_path):
         from src.training.checkpoint import find_latest_checkpoint
+
         assert find_latest_checkpoint(str(tmp_path)) is None
 
     def test_find_latest_checkpoint_valid(self, tmp_path):
@@ -271,12 +295,13 @@ class TestCheckpointFaultTolerance:
 # Prometheus Metrics Tests
 # ============================================================================
 
+
 class TestMetricsRegistry:
     def test_gauge(self):
         registry = MetricsRegistry()
         registry.gauge("gpu_memory_used_mb", 8500, {"device": "0"})
         d = registry.to_dict()
-        key = 'gpu_memory_used_mb{device=0}'
+        key = "gpu_memory_used_mb{device=0}"
         assert key in d
         assert d[key]["value"] == 8500
 
@@ -358,4 +383,3 @@ class TestTrainingCostTracker:
         tracker = TrainingCostTracker(gpu_name="RTX 3080")
         assert tracker.cost_per_token == 0
         assert tracker.cost_per_1k_tokens == 0
-

@@ -260,13 +260,10 @@ def align_proxy_scores(
     """
     if len(base_scores) != len(finetuned_scores):
         raise ValueError(
-            f"proxy score lists must align: got {len(base_scores)} and "
-            f"{len(finetuned_scores)}"
+            f"proxy score lists must align: got {len(base_scores)} and {len(finetuned_scores)}"
         )
     kept = [
-        (b, f)
-        for b, f in zip(base_scores, finetuned_scores)
-        if b is not None and f is not None
+        (b, f) for b, f in zip(base_scores, finetuned_scores) if b is not None and f is not None
     ]
     if not kept:
         return [], []

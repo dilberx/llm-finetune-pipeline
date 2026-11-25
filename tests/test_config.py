@@ -3,8 +3,6 @@ Tests for configuration management.
 """
 
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 import yaml

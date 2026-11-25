@@ -5,11 +5,8 @@ Tests quality filters, deduplication, and instruction synthesis
 without requiring GPU or external datasets.
 """
 
-import json
-import tempfile
 import textwrap
 from collections import Counter
-from pathlib import Path
 
 import pytest
 
@@ -27,10 +24,10 @@ from src.data.synthesize import (
     validate_example,
 )
 
-
 # ============================================================================
 # Quality Filter Tests
 # ============================================================================
+
 
 class TestASTValidation:
     def test_valid_python(self):
@@ -77,7 +74,7 @@ class TestCommentRatio:
 
     def test_mixed(self):
         ratio = compute_comment_ratio("# comment\nx = 1\ny = 2")
-        assert abs(ratio - 1/3) < 0.01
+        assert abs(ratio - 1 / 3) < 0.01
 
 
 class TestQualityFilter:
@@ -112,10 +109,15 @@ class TestQualityFilter:
 # Deduplication Tests
 # ============================================================================
 
+
 class TestMinHashDedup:
     def test_identical_texts_removed(self):
         dedup = MinHashDeduplicator(num_perm=64, threshold=0.5)
-        texts = ["hello world foo bar baz", "hello world foo bar baz", "completely different text here now"]
+        texts = [
+            "hello world foo bar baz",
+            "hello world foo bar baz",
+            "completely different text here now",
+        ]
         unique = dedup.deduplicate(texts)
         assert len(unique) == 2
 
@@ -145,6 +147,7 @@ class TestMinHashDedup:
 # ============================================================================
 # Instruction Synthesis Tests
 # ============================================================================
+
 
 class TestFunctionExtraction:
     def test_extracts_simple_function(self):
@@ -217,12 +220,11 @@ class TestInstructionSynthesizer:
 # Synthesized Prompt Validity
 # ============================================================================
 
+
 def _completion_prompt(func: dict) -> str:
     """Rebuild the prompt a completion example puts in front of the model."""
-    block = func.get("docstring_source") or textwrap.indent(
-        f'"""{func["docstring"]}"""', "    "
-    )
-    return f'{func["signature"]}\n{block}'
+    block = func.get("docstring_source") or textwrap.indent(f'"""{func["docstring"]}"""', "    ")
+    return f"{func['signature']}\n{block}"
 
 
 def _synthesized_code(func: dict) -> str:
@@ -313,9 +315,9 @@ class TestSynthesizedPromptsAreValidPython:
         assert is_ast_valid(_synthesized_code(func))
 
     def test_one_liner_yields_no_body(self):
-        code = '''class C:
+        code = """class C:
     def f(self): return 1
-'''
+"""
         func = [f for f in _extract_functions(code) if f["name"] == "f"][0]
         assert func["body"] == ""
 
@@ -377,6 +379,7 @@ edge
 # ============================================================================
 # Curation-Time Validity Gate
 # ============================================================================
+
 
 def _chat(prompt_block: str, completion_block: str) -> str:
     """Reproduce the ChatML shape the synthesizer emits for completions."""
@@ -478,9 +481,7 @@ class TestSynthesisValidityGate:
         """A broken template should fail the run, not quietly shrink the dataset."""
         pipeline = self._pipeline(max_invalid_ratio=0.02)
         with pytest.raises(RuntimeError, match="not valid Python"):
-            pipeline._report_synthesis_validity(
-                kept=50, rejected=Counter({"code_completion": 50})
-            )
+            pipeline._report_synthesis_validity(kept=50, rejected=Counter({"code_completion": 50}))
 
     def test_abort_message_names_the_offending_task(self):
         pipeline = self._pipeline(max_invalid_ratio=0.0)

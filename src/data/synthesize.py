@@ -8,11 +8,9 @@ for code completion, explanation, and bug-fixing tasks.
 from __future__ import annotations
 
 import ast
-import random
 import re
 import textwrap
 from typing import Any
-
 
 # Default instruction templates for code tasks
 DEFAULT_TEMPLATES = {
@@ -145,7 +143,7 @@ def _extract_functions(code: str) -> list[dict[str, str]]:
             continue
 
         try:
-            func_lines = source_lines[node.lineno - 1:node.end_lineno]
+            func_lines = source_lines[node.lineno - 1 : node.end_lineno]
             func_source = "\n".join(func_lines)
         except (AttributeError, IndexError):
             continue
@@ -159,7 +157,7 @@ def _extract_functions(code: str) -> list[dict[str, str]]:
         first_stmt = node.body[0]
         # A signature can span several lines; it runs from `def` up to the
         # first body statement. Taking only line one truncates it mid-argument.
-        signature_lines = source_lines[node.lineno - 1:first_stmt.lineno - 1]
+        signature_lines = source_lines[node.lineno - 1 : first_stmt.lineno - 1]
         signature = "\n".join(signature_lines) if signature_lines else def_line
 
         docstring = ast.get_docstring(node) or ""
@@ -171,7 +169,7 @@ def _extract_functions(code: str) -> list[dict[str, str]]:
         # from the source form while explanations use the decoded prose.
         docstring_source = ""
         if _is_docstring_stmt(first_stmt):
-            doc_lines = source_lines[first_stmt.lineno - 1:first_stmt.end_lineno]
+            doc_lines = source_lines[first_stmt.lineno - 1 : first_stmt.end_lineno]
             docstring_source = _strip_indent("\n".join(doc_lines), indent)
             body_start_idx = first_stmt.end_lineno
         else:
@@ -180,16 +178,18 @@ def _extract_functions(code: str) -> list[dict[str, str]]:
         # A one-liner such as `def f(): return 1` has no separable body; the
         # slice below would hand back the signature again.
         one_liner = first_stmt.lineno == node.lineno
-        body = "" if one_liner else "\n".join(source_lines[body_start_idx:node.end_lineno])
+        body = "" if one_liner else "\n".join(source_lines[body_start_idx : node.end_lineno])
 
-        functions.append({
-            "signature": _strip_indent(signature, indent),
-            "docstring": docstring,
-            "docstring_source": docstring_source,
-            "body": _strip_indent(body, indent),
-            "full": _strip_indent(func_source, indent),
-            "name": node.name,
-        })
+        functions.append(
+            {
+                "signature": _strip_indent(signature, indent),
+                "docstring": docstring,
+                "docstring_source": docstring_source,
+                "body": _strip_indent(body, indent),
+                "full": _strip_indent(func_source, indent),
+                "name": node.name,
+            }
+        )
 
     return functions
 
@@ -204,7 +204,8 @@ class InstructionSynthesizer:
 
     Output format (chat-style for SFT):
     {
-        "text": "<|im_start|>user\n{instruction}\n{input}<|im_end|>\n<|im_start|>assistant\n{output}<|im_end|>"
+        "text": "<|im_start|>user\n{instruction}\n{input}<|im_end|>\n"
+                "<|im_start|>assistant\n{output}<|im_end|>"
     }
     """
 

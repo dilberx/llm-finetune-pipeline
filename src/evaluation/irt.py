@@ -106,8 +106,7 @@ class IRTFit:
                 for item, b, a in zip(self.item_ids, self.difficulty, self.discrimination)
             ],
             "models": [
-                {"model_id": m, "ability": float(t)}
-                for m, t in zip(self.model_ids, self.ability)
+                {"model_id": m, "ability": float(t)} for m, t in zip(self.model_ids, self.ability)
             ],
             "degenerate_items": self.degenerate_items,
             "n_degenerate": len(self.degenerate_items),
@@ -200,13 +199,9 @@ def fit_2pl(
     items_full = (
         list(item_ids) if item_ids is not None else [f"item_{j}" for j in range(n_items_full)]
     )
-    models = (
-        list(model_ids) if model_ids is not None else [f"model_{i}" for i in range(n_models)]
-    )
+    models = list(model_ids) if model_ids is not None else [f"model_{i}" for i in range(n_models)]
     if len(items_full) != n_items_full:
-        raise ValueError(
-            f"item_ids length {len(items_full)} does not match {n_items_full} columns"
-        )
+        raise ValueError(f"item_ids length {len(items_full)} does not match {n_items_full} columns")
     if len(models) != n_models:
         raise ValueError(f"model_ids length {len(models)} does not match {n_models} rows")
 
@@ -345,7 +340,5 @@ def responses_from_raw_results(
         raise ValueError(f"no examples shared across all {len(models)} models on key '{key}'")
 
     items = sorted(shared)
-    responses = np.array(
-        [[per_model[m][item] for item in items] for m in models], dtype=float
-    )
+    responses = np.array([[per_model[m][item] for item in items] for m in models], dtype=float)
     return responses, items, models

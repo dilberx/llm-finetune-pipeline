@@ -194,9 +194,7 @@ def ppi_mean(
     f_pool = np.asarray(unlabeled_proxy, dtype=float)
 
     if y.shape != f.shape:
-        raise ValueError(
-            f"gold_labels and gold_proxy must align: got {y.shape} and {f.shape}"
-        )
+        raise ValueError(f"gold_labels and gold_proxy must align: got {y.shape} and {f.shape}")
     n = len(y)
     if n < 2:
         raise ValueError(f"need at least 2 gold examples to estimate variance, got {n}")

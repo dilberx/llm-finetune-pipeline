@@ -32,6 +32,7 @@ console = Console()
 # HumanEval Benchmark
 # ============================================================================
 
+
 def _estimate_pass_at_k(n: int, c: int, k: int) -> float:
     """
     Unbiased estimator of pass@k from n samples with c correct.
@@ -49,20 +50,20 @@ def _estimate_pass_at_k(n: int, c: int, k: int) -> float:
 HUMANEVAL_SAMPLES = [
     {
         "task_id": "HumanEval/0",
-        "prompt": 'from typing import List\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    """Check if in given list of numbers, are any two numbers closer to each other than given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    """\n',
-        "test": "def check(candidate):\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3) == True\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05) == False\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.8) == False\n    assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 1.0) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 0.5) == False\n",
+        "prompt": 'from typing import List\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    """Check if in given list of numbers, are any two numbers closer to each other than given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    """\n',  # noqa: E501
+        "test": "def check(candidate):\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3) == True\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05) == False\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.8) == False\n    assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 1.0) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 0.5) == False\n",  # noqa: E501
         "entry_point": "has_close_elements",
     },
     {
         "task_id": "HumanEval/1",
-        "prompt": 'from typing import List\n\ndef separate_paren_groups(paren_string: str) -> List[str]:\n    """Input to this function is a string containing multiple groups of nested parentheses.\n    Your goal is to separate those groups into separate strings and return the list of those.\n    Separate groups are balanced (each open brace is properly closed) and not nested within each other.\n    Ignore any spaces in the input string.\n    >>> separate_paren_groups(\'( ) (( )) (( )( ))\')\n    [\'()\', \'(())\', \'(()())\']\n    """\n',
-        "test": "def check(candidate):\n    assert candidate('(()()) ((())) () ((())()())') == ['(()())', '((()))', '()', '((())()())']\n    assert candidate('() (()) ((())) (((())))') == ['()', '(())', '((()))', '(((())))']\n    assert candidate('(()(()))(()()(()))((()))') == ['(()(()))', '(()()(()))', '((()))']\n    assert candidate('( ) (( )) (( )( ))') == ['()', '(())', '(()())']\n",
+        "prompt": "from typing import List\n\ndef separate_paren_groups(paren_string: str) -> List[str]:\n    \"\"\"Input to this function is a string containing multiple groups of nested parentheses.\n    Your goal is to separate those groups into separate strings and return the list of those.\n    Separate groups are balanced (each open brace is properly closed) and not nested within each other.\n    Ignore any spaces in the input string.\n    >>> separate_paren_groups('( ) (( )) (( )( ))')\n    ['()', '(())', '(()())']\n    \"\"\"\n",  # noqa: E501
+        "test": "def check(candidate):\n    assert candidate('(()()) ((())) () ((())()())') == ['(()())', '((()))', '()', '((())()())']\n    assert candidate('() (()) ((())) (((())))') == ['()', '(())', '((()))', '(((())))']\n    assert candidate('(()(()))(()()(()))((()))') == ['(()(()))', '(()()(()))', '((()))']\n    assert candidate('( ) (( )) (( )( ))') == ['()', '(())', '(()())']\n",  # noqa: E501
         "entry_point": "separate_paren_groups",
     },
     {
         "task_id": "HumanEval/2",
-        "prompt": 'def truncate_number(number: float) -> float:\n    """Given a positive floating point number, it can be decomposed into an integer part\n    and decimals (the decimal part is always smaller than 1).\n    Return the decimal part of the number.\n    >>> truncate_number(3.5)\n    0.5\n    """\n',
-        "test": "def check(candidate):\n    assert candidate(3.5) == 0.5\n    assert abs(candidate(1.33) - 0.33) < 1e-6\n    assert abs(candidate(123.456) - 0.456) < 1e-6\n",
+        "prompt": 'def truncate_number(number: float) -> float:\n    """Given a positive floating point number, it can be decomposed into an integer part\n    and decimals (the decimal part is always smaller than 1).\n    Return the decimal part of the number.\n    >>> truncate_number(3.5)\n    0.5\n    """\n',  # noqa: E501
+        "test": "def check(candidate):\n    assert candidate(3.5) == 0.5\n    assert abs(candidate(1.33) - 0.33) < 1e-6\n    assert abs(candidate(123.456) - 0.456) < 1e-6\n",  # noqa: E501
         "entry_point": "truncate_number",
     },
 ]
@@ -104,7 +105,9 @@ class HumanEvalBenchmark:
                     do_sample=True,
                     pad_token_id=tokenizer.eos_token_id,
                 )
-            completion = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            completion = tokenizer.decode(
+                outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
+            )
 
             # Truncate at the first function definition or class (stop at next function)
             lines = completion.split("\n")
@@ -166,6 +169,7 @@ class HumanEvalBenchmark:
 # ============================================================================
 # Perplexity Benchmark
 # ============================================================================
+
 
 class PerplexityBenchmark:
     """
@@ -235,6 +239,7 @@ class PerplexityBenchmark:
 # Code Completion Benchmark
 # ============================================================================
 
+
 class CodeCompletionBenchmark:
     """
     Custom code completion evaluation on held-out examples.
@@ -289,7 +294,7 @@ class CodeCompletionBenchmark:
         order = list(range(len(prompts)))
         if batch_size > 1:
             order.sort(key=lambda i: len(prompts[i]))
-        return [order[i:i + batch_size] for i in range(0, len(order), batch_size)]
+        return [order[i : i + batch_size] for i in range(0, len(order), batch_size)]
 
     def _generate_batch(self, model, tokenizer, prompts: list[str]) -> list[str]:
         """Generate one completion per prompt in a single call."""
@@ -310,10 +315,7 @@ class CodeCompletionBenchmark:
         # Prompts are left-padded, so every row's new tokens start at the same
         # column. Right padding would put them after a run of pad tokens.
         start = inputs["input_ids"].shape[1]
-        return [
-            tokenizer.decode(row[start:], skip_special_tokens=True).strip()
-            for row in outputs
-        ]
+        return [tokenizer.decode(row[start:], skip_special_tokens=True).strip() for row in outputs]
 
     def _generate_all(self, model, tokenizer, prompts: list[str]) -> list[str]:
         """Generate a completion for every prompt, returned in the input order."""
@@ -430,18 +432,20 @@ class CodeCompletionBenchmark:
             edit_similarity = self._edit_similarity(generated, reference)
             f1_scores.append(token_f1)
             edit_scores.append(edit_similarity)
-            raw_results.append({
-                "prompt": prompt,
-                "reference": reference,
-                "generated": generated,
-                "exact_match": exact_match,
-                "normalized_exact_match": normalized_exact,
-                "ast_match": ast_match,
-                "ast_alpha_match": alpha_match,
-                "parses": generation_parses,
-                "token_f1": token_f1,
-                "edit_similarity": edit_similarity,
-            })
+            raw_results.append(
+                {
+                    "prompt": prompt,
+                    "reference": reference,
+                    "generated": generated,
+                    "exact_match": exact_match,
+                    "normalized_exact_match": normalized_exact,
+                    "ast_match": ast_match,
+                    "ast_alpha_match": alpha_match,
+                    "parses": generation_parses,
+                    "token_f1": token_f1,
+                    "edit_similarity": edit_similarity,
+                }
+            )
 
         n = len(examples)
         return {

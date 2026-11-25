@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 from pathlib import Path
 from typing import Any
@@ -24,7 +23,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .benchmarks import HumanEvalBenchmark, PerplexityBenchmark, CodeCompletionBenchmark
+from .benchmarks import CodeCompletionBenchmark, HumanEvalBenchmark, PerplexityBenchmark
 from .metrics import compute_comparison_stats
 from .ppi import ppi_mean_difference
 from .proxy import (
@@ -57,8 +56,8 @@ class ModelEvaluator:
 
     def _load_model(self, model_config: dict) -> tuple:
         """Load a model (base or fine-tuned with adapter)."""
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         quant_config = self.config.get("quantization", {})
         bnb_config = None
@@ -171,9 +170,7 @@ class ModelEvaluator:
             console.print("  [yellow]PPI pool not found; skipping[/yellow]")
             return None
 
-        scorer = CompletionLikelihoodScorer(
-            max_length=self.ppi_config.get("max_length", 1024)
-        )
+        scorer = CompletionLikelihoodScorer(max_length=self.ppi_config.get("max_length", 1024))
         gold_examples = load_pool(gold_path)
         pool_examples = self._load_pool()
 
@@ -209,16 +206,18 @@ class ModelEvaluator:
 
         gold_examples = load_pool(self.benchmarks_config["code_completion"]["dataset"])
         aligned = align_gold_with_proxy(
-            base_raw, ft_raw, gold_examples,
-            base["proxy"]["gold"], finetuned["proxy"]["gold"], metric=metric,
+            base_raw,
+            ft_raw,
+            gold_examples,
+            base["proxy"]["gold"],
+            finetuned["proxy"]["gold"],
+            metric=metric,
         )
         if aligned is None:
             console.print("  [yellow]No gold/proxy overlap; skipping PPI[/yellow]")
             return None
 
-        pool_base, pool_ft = align_proxy_scores(
-            base["proxy"]["pool"], finetuned["proxy"]["pool"]
-        )
+        pool_base, pool_ft = align_proxy_scores(base["proxy"]["pool"], finetuned["proxy"]["pool"])
 
         estimate = ppi_mean_difference(
             gold_base=aligned["gold_base"],
@@ -337,8 +336,10 @@ class ModelEvaluator:
             if not base_bench and not ft_bench:
                 continue
 
-            metrics = set(list(base_bench.get("metrics", {}).keys()) +
-                         list(ft_bench.get("metrics", {}).keys()))
+            metrics = set(
+                list(base_bench.get("metrics", {}).keys())
+                + list(ft_bench.get("metrics", {}).keys())
+            )
 
             for metric_name in sorted(metrics):
                 row = [benchmark_name, metric_name]

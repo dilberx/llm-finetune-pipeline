@@ -14,26 +14,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from inspect import signature
 from pathlib import Path
-from typing import Any
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.console import Console
 from rich.panel import Panel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
-    DataCollatorForLanguageModeling,
 )
-from trl import SFTTrainer, SFTConfig
+from trl import SFTConfig, SFTTrainer
 
-from src.utils.config import load_config, print_config, PipelineConfig
+from src.utils.config import PipelineConfig, load_config, print_config
 
 console = Console()
 
@@ -41,6 +37,7 @@ console = Console()
 # ============================================================================
 # Model Loading
 # ============================================================================
+
 
 def _build_bnb_config(config: PipelineConfig) -> BitsAndBytesConfig | None:
     """Build BitsAndBytes quantization config for QLoRA."""
@@ -77,13 +74,15 @@ def load_model_and_tokenizer(config: PipelineConfig) -> tuple:
     Returns:
         (model, tokenizer) tuple ready for training.
     """
-    console.print(Panel(
-        f"[bold]Loading model:[/bold] {config.model.name}\n"
-        f"Quantization: {config.quantization.bits}-bit {config.quantization.quant_type}\n"
-        f"LoRA rank: {config.lora.r}, alpha: {config.lora.alpha}",
-        title="Model Setup",
-        border_style="blue",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Loading model:[/bold] {config.model.name}\n"
+            f"Quantization: {config.quantization.bits}-bit {config.quantization.quant_type}\n"
+            f"LoRA rank: {config.lora.r}, alpha: {config.lora.alpha}",
+            title="Model Setup",
+            border_style="blue",
+        )
+    )
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -135,6 +134,7 @@ def load_model_and_tokenizer(config: PipelineConfig) -> tuple:
 # Dataset Loading
 # ============================================================================
 
+
 def load_training_data(config: PipelineConfig, tokenizer) -> tuple:
     """
     Load and prepare training and evaluation datasets.
@@ -143,14 +143,12 @@ def load_training_data(config: PipelineConfig, tokenizer) -> tuple:
     - Local JSONL files (from the curation pipeline)
     - HuggingFace dataset names
     """
-    tc = config.training
-
     if config.dataset.name == "curated":
         # Load from local curated JSONL
         train_path = config.dataset.curated_path
         eval_path = config.dataset.eval_path
 
-        console.print(f"\n[bold blue]Loading curated data:[/bold blue]")
+        console.print("\n[bold blue]Loading curated data:[/bold blue]")
         console.print(f"  Train: {train_path}")
         console.print(f"  Eval:  {eval_path}")
 
@@ -192,6 +190,7 @@ def load_training_data(config: PipelineConfig, tokenizer) -> tuple:
 # ============================================================================
 # Training
 # ============================================================================
+
 
 def build_training_args(config: PipelineConfig) -> SFTConfig:
     """Build SFT training arguments from pipeline config."""
@@ -239,7 +238,7 @@ def build_training_args(config: PipelineConfig) -> SFTConfig:
 
 
 # Checkpoint management is in its own module (no GPU deps → testable in CI)
-from src.training.checkpoint import find_latest_checkpoint, validate_checkpoint
+from src.training.checkpoint import find_latest_checkpoint  # noqa: E402
 
 
 def train(config: PipelineConfig, resume_from: str | None = None) -> Path:
@@ -260,8 +259,8 @@ def train(config: PipelineConfig, resume_from: str | None = None) -> Path:
     Returns:
         Path to the saved adapter checkpoint.
     """
-    from src.utils.logging import get_logger, set_correlation_id
     from src.utils.gpu import GPUResourceManager
+    from src.utils.logging import get_logger, set_correlation_id
 
     logger = get_logger("training")
     run_id = set_correlation_id()
@@ -320,8 +319,13 @@ def train(config: PipelineConfig, resume_from: str | None = None) -> Path:
     # Record pre-training GPU state
     oom_check = gpu_manager.record_usage()
     if oom_check:
-        logger.oom_warning(**{k: v for k, v in oom_check.get("snapshot", {}).items()
-                             if k in ("device_id", "used_mb", "total_mb")})
+        logger.oom_warning(
+            **{
+                k: v
+                for k, v in oom_check.get("snapshot", {}).items()
+                if k in ("device_id", "used_mb", "total_mb")
+            }
+        )
 
     train_result = trainer.train(resume_from_checkpoint=resume_checkpoint)
 
@@ -362,15 +366,20 @@ def train(config: PipelineConfig, resume_from: str | None = None) -> Path:
 # CLI Entry Point
 # ============================================================================
 
+
 def main():
     """CLI entry point for fine-tuning."""
     parser = argparse.ArgumentParser(description="Fine-tune a code LLM with QLoRA")
     parser.add_argument(
-        "--config", type=str, default="configs/finetune_config.yaml",
+        "--config",
+        type=str,
+        default="configs/finetune_config.yaml",
         help="Path to fine-tuning config YAML",
     )
     parser.add_argument(
-        "--resume-from", type=str, default=None,
+        "--resume-from",
+        type=str,
+        default=None,
         help="Path to checkpoint to resume training from (auto-detects if not specified)",
     )
     args = parser.parse_args()

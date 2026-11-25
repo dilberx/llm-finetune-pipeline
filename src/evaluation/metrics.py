@@ -94,9 +94,7 @@ def compute_comparison_stats(
                 "direction": "lower_better" if is_lower_better else "higher_better",
             }
 
-            paired = _paired_block(
-                base_raw, ft_raw, metric_name, confidence_level=confidence_level
-            )
+            paired = _paired_block(base_raw, ft_raw, metric_name, confidence_level=confidence_level)
             if paired is not None:
                 entry["paired"] = paired
 
@@ -124,9 +122,7 @@ def _paired_block(
         return None
     if len(base_scores) < 2:
         return None
-    return paired_difference(
-        base_scores, ft_scores, confidence_level=confidence_level
-    )
+    return paired_difference(base_scores, ft_scores, confidence_level=confidence_level)
 
 
 def align_raw_results(

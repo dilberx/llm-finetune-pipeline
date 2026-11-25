@@ -272,13 +272,17 @@ def ast_equivalent(
         True when the trees are identical.
     """
     left = canonical_form(
-        generated, alpha_rename=False, ignore_docstrings=ignore_docstrings,
+        generated,
+        alpha_rename=False,
+        ignore_docstrings=ignore_docstrings,
         strip_fences=strip_fences,
     )
     if left is None:
         return False
     right = canonical_form(
-        reference, alpha_rename=False, ignore_docstrings=ignore_docstrings,
+        reference,
+        alpha_rename=False,
+        ignore_docstrings=ignore_docstrings,
         strip_fences=strip_fences,
     )
     return right is not None and left == right
@@ -307,13 +311,17 @@ def alpha_equivalent(
         True when the trees match after canonical renaming.
     """
     left = canonical_form(
-        generated, alpha_rename=True, ignore_docstrings=ignore_docstrings,
+        generated,
+        alpha_rename=True,
+        ignore_docstrings=ignore_docstrings,
         strip_fences=strip_fences,
     )
     if left is None:
         return False
     right = canonical_form(
-        reference, alpha_rename=True, ignore_docstrings=ignore_docstrings,
+        reference,
+        alpha_rename=True,
+        ignore_docstrings=ignore_docstrings,
         strip_fences=strip_fences,
     )
     return right is not None and left == right

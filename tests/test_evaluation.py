@@ -103,14 +103,18 @@ class TestComparisonStats:
         assert result["perplexity"]["perplexity"]["improved"] is True
 
     def test_summary_generation(self):
-        base = {"benchmarks": {
-            "humaneval": {"metrics": {"pass@1": 0.3}},
-            "perplexity": {"metrics": {"perplexity": 25.0}},
-        }}
-        finetuned = {"benchmarks": {
-            "humaneval": {"metrics": {"pass@1": 0.5}},
-            "perplexity": {"metrics": {"perplexity": 20.0}},
-        }}
+        base = {
+            "benchmarks": {
+                "humaneval": {"metrics": {"pass@1": 0.3}},
+                "perplexity": {"metrics": {"perplexity": 25.0}},
+            }
+        }
+        finetuned = {
+            "benchmarks": {
+                "humaneval": {"metrics": {"pass@1": 0.5}},
+                "perplexity": {"metrics": {"perplexity": 20.0}},
+            }
+        }
         result = compute_comparison_stats(base, finetuned)
 
         assert result["summary"]["total_metrics"] == 2
@@ -166,19 +170,13 @@ class TestCodeCompletionMetrics:
 
 class TestEvaluationSummaryFormatting:
     def test_delta_handles_zero_values(self):
-        assert ModelEvaluator._format_delta("exact_match", 0.0, 0.0) == (
-            "[yellow]+0.0000[/yellow]"
-        )
+        assert ModelEvaluator._format_delta("exact_match", 0.0, 0.0) == ("[yellow]+0.0000[/yellow]")
 
     def test_delta_marks_perplexity_increase_as_regression(self):
-        assert ModelEvaluator._format_delta("perplexity", 10.0, 12.0) == (
-            "[red]+2.0000[/red]"
-        )
+        assert ModelEvaluator._format_delta("perplexity", 10.0, 12.0) == ("[red]+2.0000[/red]")
 
     def test_delta_marks_perplexity_decrease_as_improvement(self):
-        assert ModelEvaluator._format_delta("perplexity", 12.0, 10.0) == (
-            "[green]-2.0000[/green]"
-        )
+        assert ModelEvaluator._format_delta("perplexity", 12.0, 10.0) == ("[green]-2.0000[/green]")
 
 
 def _raw(prompt, **fields):
@@ -686,12 +684,12 @@ class TestReportFormatting:
     def test_significance_labels(self):
         assert ModelEvaluator._format_significance(None) == "—"
         assert ModelEvaluator._format_significance({"degenerate": True}) == "degenerate"
-        assert ModelEvaluator._format_significance(
-            {"degenerate": False, "significant": True}
-        ) == "yes"
-        assert ModelEvaluator._format_significance(
-            {"degenerate": False, "significant": False}
-        ) == "no"
+        assert (
+            ModelEvaluator._format_significance({"degenerate": False, "significant": True}) == "yes"
+        )
+        assert (
+            ModelEvaluator._format_significance({"degenerate": False, "significant": False}) == "no"
+        )
 
 
 class TestMeasurementWarnings:
@@ -709,21 +707,39 @@ class TestMeasurementWarnings:
 
     def test_degenerate_bound_tightens_with_sample_size(self):
         small = ModelEvaluator._metric_warning(
-            "b", "m", {"paired": {"degenerate": True, "n_pairs": 16}})
+            "b", "m", {"paired": {"degenerate": True, "n_pairs": 16}}
+        )
         large = ModelEvaluator._metric_warning(
-            "b", "m", {"paired": {"degenerate": True, "n_pairs": 200}})
+            "b", "m", {"paired": {"degenerate": True, "n_pairs": 200}}
+        )
         assert "18.8%" in small
         assert "1.5%" in large
 
     def test_inconclusive_metric_is_flagged(self):
-        entry = {"paired": {"degenerate": False, "significant": False, "n_pairs": 16,
-                            "confidence_level": 0.95, "ci_low": -0.02, "ci_high": 0.31}}
+        entry = {
+            "paired": {
+                "degenerate": False,
+                "significant": False,
+                "n_pairs": 16,
+                "confidence_level": 0.95,
+                "ci_low": -0.02,
+                "ci_high": 0.31,
+            }
+        }
         warning = ModelEvaluator._metric_warning("code_completion", "ast_match", entry)
         assert "not established" in warning
 
     def test_significant_metric_gets_no_warning(self):
-        entry = {"paired": {"degenerate": False, "significant": True, "n_pairs": 16,
-                            "confidence_level": 0.95, "ci_low": 0.05, "ci_high": 0.21}}
+        entry = {
+            "paired": {
+                "degenerate": False,
+                "significant": True,
+                "n_pairs": 16,
+                "confidence_level": 0.95,
+                "ci_low": 0.05,
+                "ci_high": 0.21,
+            }
+        }
         assert ModelEvaluator._metric_warning("code_completion", "token_f1", entry) is None
 
     def test_unpaired_metric_gets_no_warning(self):
@@ -734,6 +750,7 @@ class TestReportSections:
     def _results(self):
         raw_base = [{"prompt": f"p{i}", "token_f1": 0.1, "exact_match": False} for i in range(8)]
         raw_ft = [{"prompt": f"p{i}", "token_f1": 0.4, "exact_match": False} for i in range(8)]
+
         def bench(raw, f1):
             return {
                 "metrics": {"token_f1": f1, "exact_match": 0.0},
@@ -797,14 +814,22 @@ class TestReportSections:
 class TestParseRatePairing:
     def test_parse_rate_pairs_against_the_parses_field(self):
         """The metric and its per-example field have different names."""
-        base = {"benchmarks": {"code_completion": {
-            "metrics": {"parse_rate": 0.5},
-            "raw_results": [{"prompt": f"p{i}", "parses": i < 4} for i in range(8)],
-        }}}
-        ft = {"benchmarks": {"code_completion": {
-            "metrics": {"parse_rate": 1.0},
-            "raw_results": [{"prompt": f"p{i}", "parses": True} for i in range(8)],
-        }}}
+        base = {
+            "benchmarks": {
+                "code_completion": {
+                    "metrics": {"parse_rate": 0.5},
+                    "raw_results": [{"prompt": f"p{i}", "parses": i < 4} for i in range(8)],
+                }
+            }
+        }
+        ft = {
+            "benchmarks": {
+                "code_completion": {
+                    "metrics": {"parse_rate": 1.0},
+                    "raw_results": [{"prompt": f"p{i}", "parses": True} for i in range(8)],
+                }
+            }
+        }
         entry = compute_comparison_stats(base, ft)["code_completion"]["parse_rate"]
 
         assert "paired" in entry
@@ -916,9 +941,12 @@ class TestProxyDiagnostics:
         sign = -1.0 if flip_proxy else 1.0
         pb, pf = sign * truth_b, sign * truth_f
         return ppi_mean_difference(
-            gold_base=truth_b[:16], gold_finetuned=truth_f[:16],
-            proxy_base=pb[:16], proxy_finetuned=pf[:16],
-            pool_proxy_base=pb, pool_proxy_finetuned=pf,
+            gold_base=truth_b[:16],
+            gold_finetuned=truth_f[:16],
+            proxy_base=pb[:16],
+            proxy_finetuned=pf[:16],
+            pool_proxy_base=pb,
+            pool_proxy_finetuned=pf,
         )
 
     def test_well_oriented_proxy_has_no_warning(self):
@@ -945,9 +973,12 @@ class TestPPIReportSection:
         proxy_b = truth_b + rng.normal(0, 0.03, 400)
         proxy_f = truth_f + rng.normal(0, 0.03, 400)
         estimate = ppi_mean_difference(
-            gold_base=truth_b[:16], gold_finetuned=truth_f[:16],
-            proxy_base=proxy_b[:16], proxy_finetuned=proxy_f[:16],
-            pool_proxy_base=proxy_b, pool_proxy_finetuned=proxy_f,
+            gold_base=truth_b[:16],
+            gold_finetuned=truth_f[:16],
+            proxy_base=proxy_b[:16],
+            proxy_finetuned=proxy_f[:16],
+            pool_proxy_base=proxy_b,
+            pool_proxy_finetuned=proxy_f,
         )
         payload = estimate.to_dict()
         payload["metric"] = "token_f1"
@@ -1218,8 +1249,9 @@ class _FakeModel:
         self.fail = fail
         self.calls = []
 
-    def generate(self, input_ids, attention_mask, max_new_tokens, pad_token_id,
-                 do_sample, temperature=None):
+    def generate(
+        self, input_ids, attention_mask, max_new_tokens, pad_token_id, do_sample, temperature=None
+    ):
         if self.fail:
             raise RuntimeError("generation failed")
         # Right-padded prompts would put the new tokens after a run of pads.
@@ -1238,8 +1270,13 @@ class _FakeModel:
 
 
 _CC_PROMPTS = [
-    "def a(x):", "def longer_name(first, second):", "x = 1", "class K:",
-    "import os, sys", "def f():", "for i in r:",
+    "def a(x):",
+    "def longer_name(first, second):",
+    "x = 1",
+    "class K:",
+    "import os, sys",
+    "def f():",
+    "for i in r:",
 ]
 
 

@@ -12,7 +12,6 @@ Features:
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +25,7 @@ console = Console()
 @dataclass
 class ServingConfig:
     """Configuration for model serving."""
+
     model_name: str = "Qwen/Qwen2.5-Coder-1.5B"
     adapter_path: str | None = None
     host: str = "0.0.0.0"
@@ -43,6 +43,7 @@ class ServingConfig:
 @dataclass
 class RequestMetrics:
     """Tracks per-request serving metrics."""
+
     total_requests: int = 0
     total_tokens_generated: int = 0
     total_latency_ms: float = 0.0
@@ -62,7 +63,8 @@ class RequestMetrics:
         self.avg_latency_ms = self.total_latency_ms / self.total_requests
         self.avg_tokens_per_second = (
             self.total_tokens_generated / (self.total_latency_ms / 1000)
-            if self.total_latency_ms > 0 else 0
+            if self.total_latency_ms > 0
+            else 0
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,8 +94,8 @@ class ModelServer:
     def _init_engine(self) -> None:
         """Initialize the vLLM inference engine."""
         try:
-            from vllm import LLM, SamplingParams
-            from vllm.lora.request import LoRARequest
+            from vllm import LLM, SamplingParams  # noqa: F401
+            from vllm.lora.request import LoRARequest  # noqa: F401
         except ImportError:
             console.print("[red]vLLM not installed. Install with: pip install vllm[/red]")
             raise
@@ -148,6 +150,7 @@ class ModelServer:
         lora_request = None
         if self.config.adapter_path:
             from vllm.lora.request import LoRARequest
+
             lora_request = LoRARequest("finetuned", 1, self.config.adapter_path)
 
         start_time = time.time()
@@ -164,11 +167,13 @@ class ModelServer:
             generated_text = output.outputs[0].text
             num_tokens = len(output.outputs[0].token_ids)
             total_tokens += num_tokens
-            results.append({
-                "generated_text": generated_text,
-                "num_tokens": num_tokens,
-                "finish_reason": output.outputs[0].finish_reason,
-            })
+            results.append(
+                {
+                    "generated_text": generated_text,
+                    "num_tokens": num_tokens,
+                    "finish_reason": output.outputs[0].finish_reason,
+                }
+            )
 
         self.metrics.record(total_tokens, elapsed_ms)
         return results
@@ -180,7 +185,10 @@ class ModelServer:
             from fastapi import FastAPI
             from pydantic import BaseModel
         except ImportError:
-            console.print("[red]FastAPI/uvicorn not installed. Install with: pip install fastapi uvicorn[/red]")
+            console.print(
+                "[red]FastAPI/uvicorn not installed. "
+                "Install with: pip install fastapi uvicorn[/red]"
+            )
             raise
 
         if self.engine is None:
@@ -222,8 +230,9 @@ class ModelServer:
         async def prometheus_metrics():
             """Prometheus-compatible metrics endpoint for monitoring systems."""
             from fastapi.responses import PlainTextResponse
-            from src.utils.metrics_export import MetricsRegistry
+
             from src.utils.gpu import GPUResourceManager
+            from src.utils.metrics_export import MetricsRegistry
 
             registry = MetricsRegistry()
             gpu_mgr = GPUResourceManager()
@@ -256,10 +265,13 @@ class ModelServer:
             """Kubernetes readiness probe — only returns OK when model is loaded."""
             if self.engine is None:
                 from fastapi.responses import JSONResponse
+
                 return JSONResponse({"status": "not_ready"}, status_code=503)
             return {"status": "ready", "model": self.config.model_name}
 
-        console.print(f"\n[bold green]Starting server on {self.config.host}:{self.config.port}[/bold green]")
+        console.print(
+            f"\n[bold green]Starting server on {self.config.host}:{self.config.port}[/bold green]"
+        )
         uvicorn.run(app, host=self.config.host, port=self.config.port)
 
 

@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 from src.utils.logging import get_logger
 
@@ -28,7 +29,8 @@ logger = get_logger("profiler")
 # Lazy imports — torch may not be installed in CI
 try:
     import torch
-    from torch.profiler import profile, record_function, ProfilerActivity, schedule
+    from torch.profiler import ProfilerActivity, profile, record_function, schedule
+
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
@@ -37,6 +39,7 @@ except ImportError:
 @dataclass
 class KernelStat:
     """Aggregated statistics for a single CUDA kernel."""
+
     name: str
     count: int
     total_time_us: float
@@ -48,6 +51,7 @@ class KernelStat:
 @dataclass
 class MemoryEvent:
     """A single memory allocation/deallocation event."""
+
     timestamp_us: float
     size_bytes: int
     operation: str  # "alloc" or "free"
@@ -57,6 +61,7 @@ class MemoryEvent:
 @dataclass
 class ProfileReport:
     """Complete profiling report for a training run."""
+
     total_time_s: float
     gpu_active_time_s: float
     gpu_utilization_pct: float
@@ -73,8 +78,12 @@ class ProfileReport:
             "peak_memory_mb": round(self.peak_memory_mb, 1),
             "bottleneck": self.bottleneck,
             "top_kernels": [
-                {"name": k.name, "count": k.count, "avg_us": round(k.avg_time_us, 1),
-                 "pct": round(k.pct_of_total, 1)}
+                {
+                    "name": k.name,
+                    "count": k.count,
+                    "avg_us": round(k.avg_time_us, 1),
+                    "pct": round(k.pct_of_total, 1),
+                }
                 for k in self.top_kernels[:10]
             ],
             "recommendations": self.recommendations,
@@ -178,8 +187,12 @@ class TrainingProfiler:
         """
         if self._profiler is None:
             return ProfileReport(
-                total_time_s=0, gpu_active_time_s=0, gpu_utilization_pct=0,
-                peak_memory_mb=0, top_kernels=[], bottleneck="unknown",
+                total_time_s=0,
+                gpu_active_time_s=0,
+                gpu_utilization_pct=0,
+                peak_memory_mb=0,
+                top_kernels=[],
+                bottleneck="unknown",
                 recommendations=["Profiling was not enabled"],
             )
 
@@ -192,14 +205,18 @@ class TrainingProfiler:
 
         for event in sorted(key_averages, key=lambda e: e.cuda_time_total, reverse=True):
             if event.cuda_time_total > 0:
-                kernel_stats.append(KernelStat(
-                    name=event.key,
-                    count=event.count,
-                    total_time_us=event.cuda_time_total,
-                    avg_time_us=event.cuda_time_total / max(event.count, 1),
-                    pct_of_total=(event.cuda_time_total / total_cuda_time * 100) if total_cuda_time > 0 else 0,
-                    self_cuda_time_us=event.self_cuda_time_total,
-                ))
+                kernel_stats.append(
+                    KernelStat(
+                        name=event.key,
+                        count=event.count,
+                        total_time_us=event.cuda_time_total,
+                        avg_time_us=event.cuda_time_total / max(event.count, 1),
+                        pct_of_total=(event.cuda_time_total / total_cuda_time * 100)
+                        if total_cuda_time > 0
+                        else 0,
+                        self_cuda_time_us=event.self_cuda_time_total,
+                    )
+                )
 
         # GPU utilization
         gpu_active_s = total_cuda_time / 1e6  # microseconds to seconds
@@ -208,12 +225,10 @@ class TrainingProfiler:
         # Peak memory
         peak_mem_mb = 0
         if HAS_TORCH and torch.cuda.is_available():
-            peak_mem_mb = torch.cuda.max_memory_allocated(self.device_id) / (1024 ** 2)
+            peak_mem_mb = torch.cuda.max_memory_allocated(self.device_id) / (1024**2)
 
         # Bottleneck analysis
-        bottleneck, recommendations = self._analyze_bottleneck(
-            kernel_stats, gpu_util, peak_mem_mb
-        )
+        bottleneck, recommendations = self._analyze_bottleneck(kernel_stats, gpu_util, peak_mem_mb)
 
         return ProfileReport(
             total_time_s=total_time,
@@ -244,42 +259,52 @@ class TrainingProfiler:
         # Check GPU utilization
         if gpu_util < 30:
             bottleneck = "io_bound"
-            recommendations.extend([
-                "GPU utilization is very low — likely bottlenecked on data loading",
-                "Try increasing dataloader num_workers",
-                "Consider using data prefetching or pinned memory",
-                "Check if gradient accumulation steps can be reduced",
-            ])
+            recommendations.extend(
+                [
+                    "GPU utilization is very low — likely bottlenecked on data loading",
+                    "Try increasing dataloader num_workers",
+                    "Consider using data prefetching or pinned memory",
+                    "Check if gradient accumulation steps can be reduced",
+                ]
+            )
         elif gpu_util < 70:
             # Check if memory operations dominate
-            memory_kernels = [k for k in kernels if "mem" in k.name.lower() or "copy" in k.name.lower()]
+            memory_kernels = [
+                k for k in kernels if "mem" in k.name.lower() or "copy" in k.name.lower()
+            ]
             memory_pct = sum(k.pct_of_total for k in memory_kernels)
 
             if memory_pct > 30:
                 bottleneck = "memory_bound"
-                recommendations.extend([
-                    "Training is memory-bound — too much time copying data",
-                    "Try gradient checkpointing to reduce memory pressure",
-                    "Consider using mixed precision (bf16) if not already",
-                    f"Peak memory: {peak_mem_mb:.0f} MB — evaluate if model fits without offloading",
-                ])
+                recommendations.extend(
+                    [
+                        "Training is memory-bound — too much time copying data",
+                        "Try gradient checkpointing to reduce memory pressure",
+                        "Consider using mixed precision (bf16) if not already",
+                        f"Peak memory: {peak_mem_mb:.0f} MB — "
+                        "evaluate if model fits without offloading",
+                    ]
+                )
             else:
                 bottleneck = "balanced"
                 recommendations.append("Training is reasonably balanced between compute and I/O")
         else:
             bottleneck = "compute_bound"
-            recommendations.extend([
-                "Training is compute-bound — GPU is well utilized",
-                "Optimization targets: larger batch size, Flash Attention, operator fusion",
-                "Consider upgrading to a GPU with more CUDA cores or tensor cores",
-            ])
+            recommendations.extend(
+                [
+                    "Training is compute-bound — GPU is well utilized",
+                    "Optimization targets: larger batch size, Flash Attention, operator fusion",
+                    "Consider upgrading to a GPU with more CUDA cores or tensor cores",
+                ]
+            )
 
         # Memory-specific recommendations
         if HAS_TORCH and torch.cuda.is_available():
-            total_mem = torch.cuda.get_device_properties(0).total_mem / (1024 ** 2)
+            total_mem = torch.cuda.get_device_properties(0).total_mem / (1024**2)
             if peak_mem_mb > total_mem * 0.85:
                 recommendations.append(
-                    f"WARNING: Peak memory ({peak_mem_mb:.0f} MB) is {peak_mem_mb/total_mem*100:.0f}% "
+                    f"WARNING: Peak memory ({peak_mem_mb:.0f} MB) is "
+                    f"{peak_mem_mb / total_mem * 100:.0f}% "
                     f"of total VRAM ({total_mem:.0f} MB) — at risk of OOM"
                 )
 

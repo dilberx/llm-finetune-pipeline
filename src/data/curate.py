@@ -16,16 +16,15 @@ from __future__ import annotations
 
 import ast
 import json
-import hashlib
 import random
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-import polars as pl
 from datasets import load_dataset
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
 from .dedup import MinHashDeduplicator
 from .synthesize import InstructionSynthesizer, validate_example
@@ -36,6 +35,7 @@ console = Console()
 # ============================================================================
 # Quality Filters
 # ============================================================================
+
 
 def is_ast_valid(code: str) -> bool:
     """Check if Python code is syntactically valid by attempting AST parse."""
@@ -161,6 +161,7 @@ class QualityFilter:
 # Data Pipeline
 # ============================================================================
 
+
 class DataCurationPipeline:
     """
     End-to-end data curation pipeline for code model training.
@@ -243,12 +244,7 @@ class DataCurationPipeline:
                 if max_samples and count >= max_samples:
                     break
                 # Extract code content — handle different dataset schemas
-                content = (
-                    sample.get("content")
-                    or sample.get("code")
-                    or sample.get("text")
-                    or ""
-                )
+                content = sample.get("content") or sample.get("code") or sample.get("text") or ""
                 if content:
                     yield {"content": content, "source": dataset_name}
                     count += 1
@@ -263,7 +259,9 @@ class DataCurationPipeline:
             yield sample
 
         if yielded == 0 and self.config.get("fallback_sources"):
-            console.print("\n[yellow]No primary source samples loaded; trying fallbacks...[/yellow]")
+            console.print(
+                "\n[yellow]No primary source samples loaded; trying fallbacks...[/yellow]"
+            )
             for sample in self._iter_sources(self.config["fallback_sources"]):
                 yield sample
 
@@ -281,7 +279,9 @@ class DataCurationPipeline:
         unique_indices = self.deduplicator.deduplicate(texts)
 
         removed = len(samples) - len(unique_indices)
-        console.print(f"  Removed {removed} near-duplicates ({removed/max(len(samples),1)*100:.1f}%)")
+        console.print(
+            f"  Removed {removed} near-duplicates ({removed / max(len(samples), 1) * 100:.1f}%)"
+        )
 
         return [samples[i] for i in unique_indices]
 
@@ -396,7 +396,7 @@ class DataCurationPipeline:
         _write_jsonl(train_path, train_samples)
         _write_jsonl(eval_path, eval_samples)
 
-        console.print(f"\n[bold green]Exported:[/bold green]")
+        console.print("\n[bold green]Exported:[/bold green]")
         console.print(f"  Train: {train_path} ({len(train_samples)} samples)")
         console.print(f"  Eval:  {eval_path} ({len(eval_samples)} samples)")
 
@@ -424,7 +424,9 @@ class DataCurationPipeline:
         console.print("\n[bold blue]Stage 2: Quality filtering...[/bold blue]")
         filtered = self._filter_batch(raw_samples)
         stats = self.quality_filter.report()
-        console.print(f"  Passed: {stats['passed']}/{stats['total']} ({stats['pass_rate']*100:.1f}%)")
+        console.print(
+            f"  Passed: {stats['passed']}/{stats['total']} ({stats['pass_rate'] * 100:.1f}%)"
+        )
         if not filtered:
             raise RuntimeError("No samples passed quality filters")
 
@@ -440,12 +442,14 @@ class DataCurationPipeline:
         train_path, eval_path = self._export(synthesized)
 
         # Print summary
-        console.print(Panel(
-            f"[bold green]Pipeline Complete[/bold green]\n"
-            f"Raw: {len(raw_samples)} → Filtered: {len(filtered)} → "
-            f"Deduped: {len(deduped)} → Synthesized: {len(synthesized)}",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold green]Pipeline Complete[/bold green]\n"
+                f"Raw: {len(raw_samples)} → Filtered: {len(filtered)} → "
+                f"Deduped: {len(deduped)} → Synthesized: {len(synthesized)}",
+                border_style="green",
+            )
+        )
 
         return train_path, eval_path
 
@@ -453,11 +457,16 @@ class DataCurationPipeline:
 def main():
     """CLI entry point for data curation."""
     import argparse
+
     import yaml
 
     parser = argparse.ArgumentParser(description="Curate training data for code model fine-tuning")
-    parser.add_argument("--config", type=str, default="configs/data_config.yaml",
-                        help="Path to data curation config")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/data_config.yaml",
+        help="Path to data curation config",
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:

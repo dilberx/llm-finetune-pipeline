@@ -21,6 +21,7 @@ console = Console()
 @dataclass
 class ModelConfig:
     """Model identification and loading settings."""
+
     name: str = "Qwen/Qwen2.5-Coder-1.5B"
     revision: str = "main"
     trust_remote_code: bool = True
@@ -30,6 +31,7 @@ class ModelConfig:
 @dataclass
 class QuantizationConfig:
     """BitsAndBytes quantization settings for QLoRA."""
+
     enabled: bool = True
     bits: int = 4
     quant_type: str = "nf4"
@@ -40,13 +42,21 @@ class QuantizationConfig:
 @dataclass
 class LoRAConfig:
     """LoRA adapter settings."""
+
     r: int = 16
     alpha: int = 32
     dropout: float = 0.05
-    target_modules: list[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj",
-    ])
+    target_modules: list[str] = field(
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+    )
     bias: str = "none"
     task_type: str = "CAUSAL_LM"
 
@@ -54,6 +64,7 @@ class LoRAConfig:
 @dataclass
 class TrainingConfig:
     """Training hyperparameters and logging settings."""
+
     output_dir: str = "./checkpoints"
     num_train_epochs: int = 3
     per_device_train_batch_size: int = 4
@@ -82,6 +93,7 @@ class TrainingConfig:
 @dataclass
 class DatasetConfig:
     """Dataset paths and settings."""
+
     name: str = "curated"
     curated_path: str = "./data/curated/train.jsonl"
     eval_path: str = "./data/curated/eval.jsonl"
@@ -96,6 +108,7 @@ class DatasetConfig:
 @dataclass
 class HardwareConfig:
     """Hardware and reproducibility settings."""
+
     device_map: str = "auto"
     seed: int = 42
 
@@ -103,6 +116,7 @@ class HardwareConfig:
 @dataclass
 class PipelineConfig:
     """Top-level pipeline configuration combining all sub-configs."""
+
     model: ModelConfig = field(default_factory=ModelConfig)
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     lora: LoRAConfig = field(default_factory=LoRAConfig)
@@ -133,7 +147,7 @@ def _apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
     for env_key, env_value in os.environ.items():
         if not env_key.startswith(prefix):
             continue
-        parts = env_key[len(prefix):].lower().split("_", 1)
+        parts = env_key[len(prefix) :].lower().split("_", 1)
         if len(parts) != 2:
             continue
         section, key = parts
@@ -154,7 +168,9 @@ def _apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
                     config[section][key] = env_value
             else:
                 config[section][key] = env_value
-            console.print(f"[dim]env override: {env_key} → {section}.{key} = {config[section][key]}[/dim]")
+            console.print(
+                f"[dim]env override: {env_key} → {section}.{key} = {config[section][key]}[/dim]"
+            )
     return config
 
 

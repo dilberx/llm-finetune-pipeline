@@ -10,8 +10,8 @@ platforms need to monitor multi-tenant training workloads.
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,6 +23,7 @@ logger = get_logger("metrics")
 @dataclass
 class MetricSample:
     """A single metric observation."""
+
     name: str
     value: float
     labels: dict[str, str] = field(default_factory=dict)
@@ -59,30 +60,32 @@ class MetricsRegistry:
 
     def _register_defaults(self) -> None:
         """Register standard ML infrastructure metric descriptions."""
-        self._descriptions.update({
-            "gpu_memory_used_mb": "GPU memory currently in use (MB)",
-            "gpu_memory_total_mb": "Total GPU memory available (MB)",
-            "gpu_memory_peak_mb": "Peak GPU memory usage during run (MB)",
-            "gpu_utilization_pct": "GPU compute utilization percentage",
-            "gpu_temperature_celsius": "GPU temperature in Celsius",
-            "gpu_power_watts": "GPU power consumption in Watts",
-            "training_loss": "Current training loss",
-            "training_learning_rate": "Current learning rate",
-            "training_steps_total": "Total training steps completed",
-            "training_samples_per_second": "Training throughput in samples/sec",
-            "training_tokens_per_second": "Training throughput in tokens/sec",
-            "training_epoch": "Current training epoch",
-            "training_gpu_hours": "Cumulative GPU-hours consumed",
-            "training_estimated_cost_usd": "Estimated training cost in USD",
-            "serving_requests_total": "Total inference requests served",
-            "serving_latency_ms": "Average inference latency in milliseconds",
-            "serving_tokens_per_second": "Inference throughput in tokens/sec",
-            "serving_queue_depth": "Current inference request queue depth",
-            "checkpoint_last_saved_timestamp": "Unix timestamp of last checkpoint save",
-            "checkpoint_size_mb": "Size of last checkpoint in MB",
-            "data_samples_processed": "Total data samples processed in curation",
-            "data_duplicates_removed": "Number of duplicates removed by dedup",
-        })
+        self._descriptions.update(
+            {
+                "gpu_memory_used_mb": "GPU memory currently in use (MB)",
+                "gpu_memory_total_mb": "Total GPU memory available (MB)",
+                "gpu_memory_peak_mb": "Peak GPU memory usage during run (MB)",
+                "gpu_utilization_pct": "GPU compute utilization percentage",
+                "gpu_temperature_celsius": "GPU temperature in Celsius",
+                "gpu_power_watts": "GPU power consumption in Watts",
+                "training_loss": "Current training loss",
+                "training_learning_rate": "Current learning rate",
+                "training_steps_total": "Total training steps completed",
+                "training_samples_per_second": "Training throughput in samples/sec",
+                "training_tokens_per_second": "Training throughput in tokens/sec",
+                "training_epoch": "Current training epoch",
+                "training_gpu_hours": "Cumulative GPU-hours consumed",
+                "training_estimated_cost_usd": "Estimated training cost in USD",
+                "serving_requests_total": "Total inference requests served",
+                "serving_latency_ms": "Average inference latency in milliseconds",
+                "serving_tokens_per_second": "Inference throughput in tokens/sec",
+                "serving_queue_depth": "Current inference request queue depth",
+                "checkpoint_last_saved_timestamp": "Unix timestamp of last checkpoint save",
+                "checkpoint_size_mb": "Size of last checkpoint in MB",
+                "data_samples_processed": "Total data samples processed in curation",
+                "data_duplicates_removed": "Number of duplicates removed by dedup",
+            }
+        )
 
     def _metric_key(self, name: str, labels: dict[str, str]) -> str:
         """Generate a unique key for a metric + label combination."""
@@ -95,7 +98,9 @@ class MetricsRegistry:
         key = self._metric_key(name, labels)
         with self._lock:
             self._metrics[key] = MetricSample(
-                name=name, value=value, labels=labels,
+                name=name,
+                value=value,
+                labels=labels,
                 metric_type="gauge",
             )
 
@@ -105,11 +110,15 @@ class MetricsRegistry:
         key = self._metric_key(name, labels)
         with self._lock:
             self._metrics[key] = MetricSample(
-                name=name, value=value, labels=labels,
+                name=name,
+                value=value,
+                labels=labels,
                 metric_type="counter",
             )
 
-    def histogram_observe(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+    def histogram_observe(
+        self, name: str, value: float, labels: dict[str, str] | None = None
+    ) -> None:
         """Record an observation for a histogram metric."""
         # Simplified: store as gauge for now
         self.gauge(name, value, labels)
@@ -140,9 +149,7 @@ class MetricsRegistry:
 
                 # Format labels
                 if sample.labels:
-                    label_str = ",".join(
-                        f'{k}="{v}"' for k, v in sorted(sample.labels.items())
-                    )
+                    label_str = ",".join(f'{k}="{v}"' for k, v in sorted(sample.labels.items()))
                     lines.append(f"{sample.name}{{{label_str}}} {sample.value}")
                 else:
                     lines.append(f"{sample.name} {sample.value}")
@@ -215,8 +222,12 @@ class TrainingCostTracker:
         """Start tracking a training run."""
         self._start_time = time.time()
         self._num_gpus = num_gpus
-        logger.info("Cost tracking started", gpu=self.gpu_name,
-                    price_per_hour=self.price_per_hour, num_gpus=num_gpus)
+        logger.info(
+            "Cost tracking started",
+            gpu=self.gpu_name,
+            price_per_hour=self.price_per_hour,
+            num_gpus=num_gpus,
+        )
 
     def record_step(self, tokens: int = 0) -> None:
         """Record a completed training step."""

@@ -261,9 +261,7 @@ def run_sweep(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
             f"need {MIN_MODELS_FOR_IRT}."
         )
 
-    payload = calibrate(
-        scored, metric=args.metric, threshold=args.threshold, keep_items=args.keep
-    )
+    payload = calibrate(scored, metric=args.metric, threshold=args.threshold, keep_items=args.keep)
     payload["checkpoints"] = [
         {"name": r.name, "step": r.step, "adapter_path": r.adapter_path} for r in refs
     ]

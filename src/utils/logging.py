@@ -17,15 +17,14 @@ import json
 import logging
 import os
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-
 # ============================================================================
 # JSON Formatter
 # ============================================================================
+
 
 class JSONFormatter(logging.Formatter):
     """
@@ -69,10 +68,10 @@ class HumanFormatter(logging.Formatter):
     """
 
     COLORS = {
-        "DEBUG": "\033[36m",     # Cyan
-        "INFO": "\033[32m",      # Green
-        "WARNING": "\033[33m",   # Yellow
-        "ERROR": "\033[31m",     # Red
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
         "CRITICAL": "\033[35m",  # Magenta
     }
     RESET = "\033[0m"
@@ -152,25 +151,70 @@ class StructuredLogger:
     # --- Training-Specific Events ---
 
     def epoch_start(self, epoch: int, total_epochs: int, **kwargs: Any) -> None:
-        self._log(logging.INFO, f"Epoch {epoch}/{total_epochs} started", epoch=epoch, total_epochs=total_epochs, event="epoch_start", **kwargs)
+        self._log(
+            logging.INFO,
+            f"Epoch {epoch}/{total_epochs} started",
+            epoch=epoch,
+            total_epochs=total_epochs,
+            event="epoch_start",
+            **kwargs,
+        )
 
     def epoch_end(self, epoch: int, loss: float, **kwargs: Any) -> None:
-        self._log(logging.INFO, f"Epoch {epoch} complete — loss={loss:.4f}", epoch=epoch, loss=loss, event="epoch_end", **kwargs)
+        self._log(
+            logging.INFO,
+            f"Epoch {epoch} complete — loss={loss:.4f}",
+            epoch=epoch,
+            loss=loss,
+            event="epoch_end",
+            **kwargs,
+        )
 
     def checkpoint_saved(self, path: str, step: int, **kwargs: Any) -> None:
-        self._log(logging.INFO, f"Checkpoint saved at step {step}", path=path, step=step, event="checkpoint_saved", **kwargs)
+        self._log(
+            logging.INFO,
+            f"Checkpoint saved at step {step}",
+            path=path,
+            step=step,
+            event="checkpoint_saved",
+            **kwargs,
+        )
 
     def checkpoint_loaded(self, path: str, step: int, **kwargs: Any) -> None:
-        self._log(logging.INFO, f"Resumed from checkpoint at step {step}", path=path, step=step, event="checkpoint_loaded", **kwargs)
+        self._log(
+            logging.INFO,
+            f"Resumed from checkpoint at step {step}",
+            path=path,
+            step=step,
+            event="checkpoint_loaded",
+            **kwargs,
+        )
 
     def oom_warning(self, device_id: int, used_mb: float, total_mb: float, **kwargs: Any) -> None:
-        self._log(logging.WARNING, f"OOM risk on GPU {device_id}: {used_mb:.0f}/{total_mb:.0f} MB", device_id=device_id, used_mb=used_mb, total_mb=total_mb, event="oom_warning", **kwargs)
+        self._log(
+            logging.WARNING,
+            f"OOM risk on GPU {device_id}: {used_mb:.0f}/{total_mb:.0f} MB",
+            device_id=device_id,
+            used_mb=used_mb,
+            total_mb=total_mb,
+            event="oom_warning",
+            **kwargs,
+        )
 
     def training_complete(self, metrics: dict[str, Any], **kwargs: Any) -> None:
-        self._log(logging.INFO, "Training complete", metrics=metrics, event="training_complete", **kwargs)
+        self._log(
+            logging.INFO, "Training complete", metrics=metrics, event="training_complete", **kwargs
+        )
 
     def pipeline_stage(self, stage: str, status: str, **kwargs: Any) -> None:
-        self._log(logging.INFO, f"Pipeline stage: {stage} — {status}", stage=stage, status=status, event="pipeline_stage", **kwargs)
+        self._log(
+            logging.INFO,
+            f"Pipeline stage: {stage} — {status}",
+            stage=stage,
+            status=status,
+            event="pipeline_stage",
+            **kwargs,
+        )
 
 
 def get_logger(component: str = "general") -> StructuredLogger:
