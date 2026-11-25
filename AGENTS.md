@@ -214,6 +214,64 @@ Beware `train_steps_per_second` in `training_metadata.json`: HF computes it as
 count by the runtime of only the resumed segment. The 0.642 recorded there
 implies a far faster rate than the ~0.25 steps/s actually achieved.
 
+## Pilot, baseline and checkpoint-ladder findings
+
+All on `data/eval/code_completion_200_fixed.jsonl` (build it with
+`scripts/build_eval_sets.py`), greedy, batch 16, 256 new tokens. Raw results and
+analysis scripts are under `reports/` (gitignored, local only).
+
+**The older sets are contaminated.** `code_completion_200.jsonl` was sampled
+before the synthesizer's indentation fix (117 of 200 prompts carry the defect,
+which flatters a model trained on the defective data), and 14 of its prompts
+also appear in train.
+
+### Pilot against a fair baseline
+
+The zero-shot base model repeats the instruction, so most of its gap to an
+adapter is output format. The fair baseline prompts the base few-shot and cuts
+every output, base and adapter alike, to its first fenced block
+(`reports/pilot20k/fair_baseline.py`):
+
+| paired against the few-shot base | token_f1 difference [95% CI] | parse_rate difference [95% CI] |
+|----------------------------------|------------------------------|--------------------------------|
+| pilot (20k examples, 1 epoch)    | +0.058 [+0.034, +0.083]      | +0.080 [+0.035, +0.130]        |
+| old adapter (pre-fix data)       | +0.124 [+0.094, +0.155]      | +0.050 [-0.005, +0.105]        |
+
+The old adapter used about 30x the compute of the pilot (1.22e18 against 4.1e16
+FLOPs as logged by the Trainer). It differs in data as well as compute, so the
+gap between the two is not attributable to either. The README's parse-rate
+headline predates all of this.
+
+Against the zero-shot base without the cut, 93% of the pilot's final token_f1
+gain is already there at step 350 of 2,500.
+
+### IRT on checkpoint ladders
+
+`configs/finetune_early_ladder*.yaml` run the first 350 steps of the 2,500-step
+schedule with a checkpoint every 10 (`scripts/early_ladder.sh`, about 40
+minutes; set `CONFIG` and `OUT` for the second one). Each ladder was scored at
+base and steps 10, 20, 40, 80, 160 and 350, about 1.2 h per ladder. Ladder 1 is
+the fixed corpus with seed 42, ladder 2 the pre-fix corpus with seed 43.
+
+- The pilot's own checkpoints (every 350 steps) sit close together apart from
+  the base model. The early ladder is where ability spreads: token_f1 goes from
+  about 0.2 to 0.45 between steps 40 and 160 (ladder 1) or 40 and 80 (ladder 2).
+- Use `token_f1 >= 0.5` as the response. `ast_match` leaves 195-196 of 200
+  items degenerate.
+- **`fit_2pl`'s default of 2,000 iterations does not converge here.** These fits
+  needed 4,000-11,000. `calibrate` and the sweep CLI do not expose the cap, so
+  call `fit_2pl(..., max_iterations=500000)` and check `converged`.
+- Difficulty agrees only moderately across the two ladders: Spearman 0.51 [0.30,
+  0.68] on the 94 items fitted in both.
+- Predicting which of those items a held-out model passes (AUC): the other
+  ladder's step-80/160/350 checkpoints 0.39-0.87, the old adapter 0.61-0.65.
+  Within a ladder, in-sample, the final checkpoint reaches 0.96-0.99.
+- **A plain per-item pass rate does nearly as well as IRT difficulty.** IRT led
+  clearly only from ladder 1 to ladder 2 (0.76/0.68/0.80 against
+  0.67/0.67/0.66); the differences were not significance-tested.
+- Limits: two runs, 7 models per ladder, one 200-item set. The pilot adapter is
+  the same trajectory as ladder 1, so its 0.83 AUC is not a transfer result.
+
 ## Makefile
 
 Targets use `$(PYTHON)`, which resolves to `venv/bin/python` when present, then
@@ -229,3 +287,9 @@ StarCoder, which is not what actually runs.
 `make curate` overwrites `data/curated/{train,eval}.jsonl` in place. Back them
 up first — a subdirectory of `data/curated/` survives the run and stays
 gitignored.
+
+Curation still leaks across the split: MinHash dedup compares whole files, so a
+function whose signature and docstring recur in different files can put the same
+prompt in train and eval (307 of 3,055 completion eval rows).
+`scripts/build_eval_sets.py` drops those when sampling; curation itself is not
+fixed.
