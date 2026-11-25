@@ -1,0 +1,23 @@
+# ============================================================================
+# Accelerate Configuration — Multi-GPU with DeepSpeed ZeRO Stage 2
+# ============================================================================
+# Used with: accelerate launch --config_file configs/accelerate_config.yaml
+# ============================================================================
+
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+deepspeed_config:
+  deepspeed_config_file: configs/deepspeed_config.json
+  zero3_init_flag: false
+downcast_bf16: "no"
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 1                          # set to number of GPUs available
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

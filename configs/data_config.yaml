@@ -10,6 +10,12 @@ sources:
     max_samples: 50000
     streaming: true
 
+fallback_sources:
+  - name: "codeparrot/codeparrot-clean"
+    split: "train"
+    max_samples: 50000
+    streaming: true
+
 # --- Quality Filters ---
 filters:
   # Minimum and maximum line counts
@@ -43,6 +49,12 @@ deduplication:
 synthesis:
   enabled: true
   method: "self_instruct"
+
+  # Reject synthesized examples whose code is not valid Python, and abort the
+  # run if too many are rejected. A high rate means a template is emitting
+  # malformed code rather than that the corpus is messy.
+  validate: true
+  max_invalid_ratio: 0.02
   # Template for converting raw code to instruction-following format
   templates:
     code_completion:

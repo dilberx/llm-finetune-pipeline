@@ -31,7 +31,6 @@ dependencies = [
     "accelerate>=0.28.0",
     "bitsandbytes>=0.43.0",
     "trl>=0.8.0",
-    "wandb>=0.16.0",
     "tensorboard>=2.16.0",
     "pyyaml>=6.0",
     "rich>=13.0",
@@ -61,6 +60,7 @@ dev = [
 [project.scripts]
 finetune = "src.training.finetune:main"
 evaluate-model = "src.evaluation.evaluate:main"
+sweep-checkpoints = "src.evaluation.sweep:main"
 curate-data = "src.data.curate:main"
 serve-model = "src.serving.server:main"
 

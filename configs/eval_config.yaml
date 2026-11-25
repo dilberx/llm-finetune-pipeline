@@ -42,6 +42,10 @@ benchmarks:
     dataset: "./data/eval/code_completion.jsonl"
     max_new_tokens: 256
     temperature: 0.2
+    # 4x faster than 1 on the 200-example set, with no significant change in
+    # any aggregate score; see AGENTS.md. Per-example outputs do change with
+    # batch size, so keep it fixed across runs you will compare item by item.
+    batch_size: 16
 
 # --- Comparison ---
 comparison:
@@ -61,3 +65,21 @@ hardware:
   device_map: "auto"
   batch_size: 8
   seed: 42
+
+# --- Prediction-Powered Inference ---
+# Generation is what makes this eval expensive, so only a small set gets
+# generated and scored. Teacher-forced likelihood of the reference completion
+# costs one forward pass, so it reaches thousands of examples. PPI carries the
+# generated measurement onto that larger pool and corrects the proxy's bias
+# using the overlap, which keeps the interval valid even though the proxy is
+# not a faithful stand-in for generation quality.
+ppi:
+  enabled: true
+  pool_path: "./data/curated/eval.jsonl"
+  # The curated split mixes task types. PPI estimates the mean over the pool,
+  # so the pool must match the gold set's distribution or it answers a
+  # different question than the one being asked.
+  pool_task: "code_completion"
+  max_pool_samples: 2000
+  max_length: 1024
+  metric: "token_f1"

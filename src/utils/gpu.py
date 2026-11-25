@@ -13,11 +13,11 @@ machines (Apple Silicon, CPU-only containers).
 
 from __future__ import annotations
 
-import json
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Generator
+from typing import Any
 
 from rich.console import Console
 
@@ -26,12 +26,14 @@ console = Console()
 # Optional NVIDIA imports — graceful degradation on non-GPU systems
 try:
     import torch
+
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
 
 try:
     import pynvml
+
     pynvml.nvmlInit()
     HAS_NVML = True
 except (ImportError, Exception):
@@ -41,6 +43,7 @@ except (ImportError, Exception):
 @dataclass
 class GPUSnapshot:
     """Point-in-time snapshot of GPU memory state."""
+
     device_id: int
     device_name: str
     total_mb: float
@@ -73,6 +76,7 @@ class GPUSnapshot:
 @dataclass
 class MemoryTracker:
     """Tracks VRAM usage over time for a single GPU."""
+
     device_id: int
     snapshots: list[float] = field(default_factory=list)
     peak_mb: float = 0.0
@@ -179,9 +183,9 @@ class GPUResourceManager:
                 return GPUSnapshot(
                     device_id=device_id,
                     device_name=name,
-                    total_mb=mem_info.total / (1024 ** 2),
-                    used_mb=mem_info.used / (1024 ** 2),
-                    free_mb=mem_info.free / (1024 ** 2),
+                    total_mb=mem_info.total / (1024**2),
+                    used_mb=mem_info.used / (1024**2),
+                    free_mb=mem_info.free / (1024**2),
                     utilization_pct=util.gpu,
                     temperature_c=temp,
                     power_w=power,
@@ -190,8 +194,8 @@ class GPUResourceManager:
                 pass
 
         if HAS_TORCH and torch.cuda.is_available() and device_id < torch.cuda.device_count():
-            total = torch.cuda.get_device_properties(device_id).total_mem / (1024 ** 2)
-            used = torch.cuda.memory_allocated(device_id) / (1024 ** 2)
+            total = torch.cuda.get_device_properties(device_id).total_memory / (1024**2)
+            used = torch.cuda.memory_allocated(device_id) / (1024**2)
             return GPUSnapshot(
                 device_id=device_id,
                 device_name=torch.cuda.get_device_name(device_id),
@@ -207,10 +211,7 @@ class GPUResourceManager:
 
     def get_all_snapshots(self) -> list[GPUSnapshot]:
         """Capture snapshots for all available GPUs."""
-        return [
-            snap for i in range(self.num_gpus)
-            if (snap := self.get_snapshot(i)) is not None
-        ]
+        return [snap for i in range(self.num_gpus) if (snap := self.get_snapshot(i)) is not None]
 
     def record_usage(self, device_id: int = 0) -> dict[str, Any] | None:
         """
@@ -243,7 +244,9 @@ class GPUResourceManager:
         return None
 
     @contextmanager
-    def track_operation(self, operation_name: str, device_id: int = 0) -> Generator[dict, None, None]:
+    def track_operation(
+        self, operation_name: str, device_id: int = 0
+    ) -> Generator[dict, None, None]:
         """
         Context manager to track GPU memory during an operation.
 
@@ -256,7 +259,7 @@ class GPUResourceManager:
 
         if HAS_TORCH and torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats(device_id)
-            before = torch.cuda.memory_allocated(device_id) / (1024 ** 2)
+            before = torch.cuda.memory_allocated(device_id) / (1024**2)
         else:
             before = 0
 
@@ -264,14 +267,16 @@ class GPUResourceManager:
             yield metrics
         finally:
             if HAS_TORCH and torch.cuda.is_available():
-                after = torch.cuda.memory_allocated(device_id) / (1024 ** 2)
-                peak = torch.cuda.max_memory_allocated(device_id) / (1024 ** 2)
-                metrics.update({
-                    "before_mb": round(before, 1),
-                    "after_mb": round(after, 1),
-                    "peak_mb": round(peak, 1),
-                    "delta_mb": round(after - before, 1),
-                })
+                after = torch.cuda.memory_allocated(device_id) / (1024**2)
+                peak = torch.cuda.max_memory_allocated(device_id) / (1024**2)
+                metrics.update(
+                    {
+                        "before_mb": round(before, 1),
+                        "after_mb": round(after, 1),
+                        "peak_mb": round(peak, 1),
+                        "delta_mb": round(after - before, 1),
+                    }
+                )
 
     def recommend_device_map(self, model_size_mb: float) -> dict[str, Any]:
         """
@@ -288,17 +293,36 @@ class GPUResourceManager:
 
         if len(snapshots) == 1:
             if snapshots[0].free_mb >= model_size_mb * 1.2:
-                return {"strategy": "single_gpu", "device": 0, "free_mb": round(snapshots[0].free_mb, 1)}
+                return {
+                    "strategy": "single_gpu",
+                    "device": 0,
+                    "free_mb": round(snapshots[0].free_mb, 1),
+                }
             else:
-                return {"strategy": "offload_cpu", "device": 0, "reason": "insufficient_vram",
-                        "free_mb": round(snapshots[0].free_mb, 1), "needed_mb": round(model_size_mb, 1)}
+                return {
+                    "strategy": "offload_cpu",
+                    "device": 0,
+                    "reason": "insufficient_vram",
+                    "free_mb": round(snapshots[0].free_mb, 1),
+                    "needed_mb": round(model_size_mb, 1),
+                }
 
         if total_free >= model_size_mb * 1.1:
-            devices = sorted(range(len(snapshots)), key=lambda i: snapshots[i].free_mb, reverse=True)
-            return {"strategy": "multi_gpu", "devices": devices, "total_free_mb": round(total_free, 1)}
+            devices = sorted(
+                range(len(snapshots)), key=lambda i: snapshots[i].free_mb, reverse=True
+            )
+            return {
+                "strategy": "multi_gpu",
+                "devices": devices,
+                "total_free_mb": round(total_free, 1),
+            }
 
-        return {"strategy": "offload_cpu", "reason": "insufficient_total_vram",
-                "total_free_mb": round(total_free, 1), "needed_mb": round(model_size_mb, 1)}
+        return {
+            "strategy": "offload_cpu",
+            "reason": "insufficient_total_vram",
+            "total_free_mb": round(total_free, 1),
+            "needed_mb": round(model_size_mb, 1),
+        }
 
     def export_metrics(self) -> dict[str, Any]:
         """Export all tracked metrics as structured JSON for monitoring systems."""

@@ -18,7 +18,7 @@ def _tokenize(text: str, ngram_size: int = 5) -> list[str]:
     text = text.strip().lower()
     if len(text) < ngram_size:
         return [text]
-    return [text[i:i + ngram_size] for i in range(len(text) - ngram_size + 1)]
+    return [text[i : i + ngram_size] for i in range(len(text) - ngram_size + 1)]
 
 
 def _create_minhash(tokens: list[str], num_perm: int) -> MinHash:

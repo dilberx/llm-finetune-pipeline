@@ -1,0 +1,46 @@
+models:
+  base:
+    name: "Qwen/Qwen2.5-Coder-1.5B"
+    revision: "main"
+    trust_remote_code: true
+  finetuned:
+    name: "Qwen/Qwen2.5-Coder-1.5B"
+    adapter_path: "./checkpoints/best"
+    trust_remote_code: true
+
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"
+  double_quant: true
+  compute_dtype: "bfloat16"
+
+benchmarks:
+  humaneval:
+    enabled: false
+  perplexity:
+    enabled: true
+    dataset: "./data/eval/target_perplexity.txt"
+    stride: 512
+    max_length: 2048
+  code_completion:
+    enabled: true
+    dataset: "./data/eval/code_completion.jsonl"
+    max_new_tokens: 256
+    temperature: 0.2
+
+comparison:
+  statistical_test: "paired_t_test"
+  confidence_level: 0.95
+  num_bootstrap_samples: 1000
+
+output:
+  report_dir: "./reports/target_domain"
+  format: ["markdown", "json"]
+  include_plots: true
+  include_raw_results: true
+
+hardware:
+  device_map: "auto"
+  batch_size: 8
+  seed: 42
