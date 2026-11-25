@@ -30,79 +30,99 @@ A production-grade ML training platform for fine-tuning, evaluating, and serving
 ├─────────────────────────────────────────────────────────────────────┤
 │  CI/CD: GitHub Actions (lint → test → Docker build)                  │
 │  Config: YAML + env overrides + dataclass validation                 │
-│  Tests: 80 unit tests (CPU-compatible, no GPU required)              │
+│  Tests: 285 unit tests (CPU-compatible, no GPU required)             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Status
 
-A full QLoRA fine-tuning run has been completed on this pipeline.
+Two QLoRA adapters have been trained on this pipeline, both on a single 10 GB RTX 3080
+under WSL2:
 
-- **Base model**: Qwen/Qwen2.5-Coder-1.5B
-- **Method**: QLoRA (4-bit NF4, LoRA r=16, α=32)
-- **Training**: ~50K steps, ~22 hours on a single RTX 3080 (10 GB VRAM)
-- **Training data**: ~134K curated code instruction examples (ChatML format)
-- **Adapter**: saved to `checkpoints/best/`
-- **Training crashed 3 times** during the run — checkpoint fault tolerance handled all three resumes without data loss
+| | Old adapter | Pilot adapter |
+|---|---|---|
+| Base model | Qwen/Qwen2.5-Coder-1.5B | same |
+| Method | QLoRA, 4-bit NF4, LoRA r=16, α=32, effective batch 8 | same |
+| Training data | ~134K curated examples, **before** the synthesis fix below | 20K of the ~134K, **after** the fix |
+| Data source | `codeparrot/codeparrot-clean` (`bigcode/starcoderdata` is gated and fails to load) | same |
+| Length | ~50K steps (~3 epochs); resumed after several crashes | 2,500 steps (1 epoch), ~4.7 h |
+| Compute (Trainer FLOPs) | 1.22e18 | 4.1e16 (~30x less) |
+| Location | `checkpoints/_archive_20261111-232116_prefix_best/best` | `checkpoints/best` |
 
-### Evaluation Results
+`checkpoints/` is gitignored; the adapters are local only.
 
-Two evaluations were run: one on the target code distribution, one on generic benchmarks.
+The old adapter's run crashed and resumed several times, and checkpoint recovery picked
+each one up. Its logged `train_steps_per_second` covers only the last resumed segment, so
+it overstates the real rate (see `AGENTS.md`).
 
-**Target-domain evaluation** (16 held-out code completions + 128 perplexity samples from the curated distribution):
+### Evaluation results
 
-| Metric | Base | Fine-tuned | Change |
-|--------|------|-----------|--------|
-| Perplexity | 3.27 | 3.04 | −7.0% (better) |
-| Code completion token F1 | 0.10 | 0.23 | +128% (better) |
-| Code completion exact match | 0.00 | 0.00 | metric ceiling — see below |
+All on `data/eval/code_completion_200_fixed.jsonl`: 200 held-out completions from the
+fixed curated split, with no prompt shared with train. Greedy decoding, batch 16, 256 new
+tokens. CIs are 95% paired bootstrap.
 
-**Generic benchmark** (3-problem HumanEval sample + Wikitext perplexity):
+**The base model needs a fair prompt.** Zero-shot, it repeats the instruction and rewrites
+the whole function (~1,091 characters against ~300 for an adapter), so most of a naive
+base-vs-adapter gap is output format. The fair baseline gives the base three worked
+examples and cuts every output, base and adapter alike, to its first fenced code block:
 
-| Metric | Base | Fine-tuned | Change |
-|--------|------|-----------|--------|
-| Wikitext perplexity | 10.33 | 12.54 | +21% (worse) |
-| HumanEval pass@1 | 0.00 | 0.00 | no change |
+| Paired against the few-shot base | Token F1 Δ [95% CI] | Parse rate Δ [95% CI] |
+|---|---|---|
+| Pilot adapter | +0.058 [+0.034, +0.083] | +0.080 [+0.035, +0.130] |
+| Old adapter | +0.124 [+0.094, +0.155] | +0.050 [−0.005, +0.105] |
 
-**What this means**: The adapter improved on the target code distribution — lower perplexity and better token overlap on completions. Generic prose perplexity got worse, which is expected when you specialize a model on code. The HumanEval sample is too small (3 problems) to draw conclusions from. This is a directional signal on a small eval set, not a definitive benchmark result.
+Absolute scores with no output cut, for reference:
 
-> **Superseded — see the 200-example results below.** The table above comes from a
-> 16-example evaluation, which was too small to resolve the effects that matter. Every
-> metric it reported as zero-for-both turned out to be rare rather than absent: `ast_match`
-> read 0/16 for both models, then 15/200 at p=0.0001 on a larger set.
->
-> `exact_match` is also confounded rather than broken. Every reference is wrapped in
-> markdown code fences, so it scores correct code as a miss unless the fence markers are
-> reproduced too — it measures format alongside correctness. It is not a hard ceiling:
-> the fine-tuned model produced 2 exact matches in 200.
->
-> A separate defect in the synthesis templates left roughly 70% of generated training
-> prompts syntactically invalid (a docstring indented to a fixed 4 spaces regardless of
-> whether the function was a method). That is fixed, and curation now aborts when too many
-> synthesized examples fail to parse. **The numbers above predate that fix.**
+| Metric | Zero-shot base | Old adapter | Pilot adapter |
+|---|---|---|---|
+| Token F1 | 0.161 | 0.534 | 0.469 |
+| Parse rate | 0.400 | 0.905 | 0.935 |
+| AST match | 0.000 | 0.090 | 0.015 |
+| Exact match | 0.000 | 0.000 | 0.000 |
 
-### 200-example evaluation
+**What this means**: fine-tuning helps beyond format, but by much less than the raw table
+suggests. The old adapter used ~30x the compute and different data, so its larger gain
+cannot be put down to either one. On the pilot, 93% of the final token-F1 gain over the
+zero-shot base is already there at step 350 of 2,500. Structural correctness (`ast_match`)
+stays rare. Specializing on code costs general language modeling: with the old adapter, Wikitext
+perplexity rose from 10.33 to 12.54 (not re-measured for the pilot).
 
-Run on 200 held-out completions with a disjoint 600-example proxy pool. Same adapter, same
-base model; a larger and more informative eval set.
+`exact_match` is confounded rather than broken: every reference is wrapped in markdown
+code fences, so it scores correct code as a miss unless the fences are reproduced too.
 
-| Metric | Base | Fine-tuned | Δ | 95% CI | p |
-|--------|------|-----------|---|--------|---|
-| Parse rate | 0.235 | **0.810** | +0.575 | [+0.500, +0.650] | <0.0001 |
-| Token F1 | 0.214 | 0.492 | +0.278 | [+0.244, +0.313] | <0.0001 |
-| Edit similarity | 0.088 | 0.357 | +0.269 | [+0.231, +0.308] | <0.0001 |
-| AST match | 0.000 | 0.075 | +0.075 | [+0.040, +0.115] | 0.0001 |
-| Exact match | 0.000 | 0.010 | +0.010 | [+0.000, +0.025] | 0.157 (n.s.) |
+### Superseded results
 
-**What this means**: the dominant effect is that the fine-tuned model produces *parseable,
-correctly formatted Python*. The base model manages it under a quarter of the time —
-answering in prose, or in one case in Java. Structural correctness improves too, but
-remains rare at 7.5%. Generic Wikitext perplexity still regresses; specializing on code
-costs general language modeling.
+Earlier versions of this README reported a 16-example evaluation and then a 200-example
+one (parse rate 0.235 → 0.810, token F1 0.214 → 0.492). **Both are withdrawn.**
 
-A prediction-powered estimate over the disjoint pool puts the token-F1 effect at +0.303
-[+0.276, +0.331], with the cheap proxy correlating at r=0.69 — the 200 generated examples
-carry the statistical weight of about 308.
+- A defect in the synthesis templates indented docstrings to a fixed 4 spaces whether or
+  not the function was a method, which left roughly 70% of synthesized training prompts
+  syntactically invalid. It is fixed, and curation now aborts when too many synthesized
+  examples fail to parse.
+- The old 200-example set (`data/eval/code_completion_200.jsonl`) was sampled before that
+  fix. 117 of its 200 prompts carry the defect, which flatters a model trained on the
+  defective data, and 14 of its prompts also appear in train.
+- Its baseline was the zero-shot base, so the headline parse-rate gain was mostly format.
+
+`scripts/build_eval_sets.py` rebuilds the gold and PPI sets from the current split. It
+drops prompts that also appear in train, and stops if any sampled prompt still carries the
+defect.
+
+### Evaluation methods in the repo
+
+- **Prediction-powered inference** (`src/evaluation/ppi.py`): generates on a small gold
+  set and carries the estimate onto a larger pool using a cheap teacher-forced proxy.
+- **IRT item calibration** (`src/evaluation/sweep.py`, `make sweep`): fits a 2PL model
+  over training checkpoints. On two independent early-checkpoint ladders, item difficulty
+  agreed only moderately across runs (Spearman 0.51), and a plain per-item pass rate
+  predicted held-out models nearly as well. Treat it as exploratory; details are in
+  `AGENTS.md`.
+- **Batched evaluation**: batch 16 is 4x faster than 1 with no significant change in any
+  aggregate score, but it changes about 42% of individual greedy outputs (numerical
+  near-ties, not a masking bug). Compare per-item results only within one batch size.
+
+Measured numbers, hardware gotchas and the reasoning behind them are in
+[AGENTS.md](AGENTS.md).
 
 ## Quick Start
 
@@ -257,7 +277,12 @@ llm-finetune-pipeline/
 │   ├── evaluation/
 │   │   ├── evaluate.py       # Orchestrator: base vs. fine-tuned comparison
 │   │   ├── benchmarks.py     # HumanEval (pass@k), perplexity, code completion
-│   │   └── metrics.py        # Statistical comparison with bootstrap CIs
+│   │   ├── code_equivalence.py # Parse and AST-equivalence scoring
+│   │   ├── metrics.py        # Statistical comparison with bootstrap CIs
+│   │   ├── ppi.py            # Prediction-powered inference
+│   │   ├── proxy.py          # Teacher-forced proxy scores for PPI
+│   │   ├── irt.py            # 2PL item response model
+│   │   └── sweep.py          # Score checkpoints and calibrate the eval set
 │   ├── serving/
 │   │   └── server.py         # vLLM server with Prometheus /metrics endpoint
 │   └── utils/
@@ -267,11 +292,19 @@ llm-finetune-pipeline/
 │       ├── profiler.py       # Training profiler (PyTorch profiler wrapper)
 │       └── metrics_export.py # Prometheus exporter + cost tracker
 ├── configs/
-│   ├── finetune_config.yaml
+│   ├── finetune_config.yaml  # Full run on the local card
+│   ├── finetune_pilot_local.yaml  # 20K-example, one-epoch pilot (local)
+│   ├── finetune_cloud.yaml   # Same pilot for a rented 24 GB card
+│   ├── finetune_early_ladder*.yaml # First 350 steps, checkpoint every 10
 │   ├── data_config.yaml
 │   ├── eval_config.yaml
 │   └── deepspeed_config.json # DeepSpeed ZeRO Stage 2 for multi-GPU
-├── tests/                    # 80 unit tests (CPU-compatible)
+├── scripts/
+│   ├── gpu_preflight.sh      # Refuse GPU jobs when VRAM is short (WSL2-aware)
+│   ├── build_eval_sets.py    # Rebuild gold and PPI eval sets from the split
+│   ├── early_ladder.sh       # Train the first N steps, then stop
+│   └── cloud_train.sh        # Pilot run on a rented GPU
+├── tests/                    # 285 unit tests (CPU-compatible)
 ├── Dockerfile                # Multi-stage CUDA 12.1 container
 ├── docker-compose.yaml       # 4-service GPU orchestration
 ├── Makefile                  # Developer workflow automation
@@ -313,9 +346,10 @@ accelerate launch --config_file configs/accelerate_config.yaml \
 ## Testing
 
 ```bash
-make test       # 80 tests, all CPU-compatible
+make test       # 285 tests, all CPU-compatible
 make lint       # ruff lint + format check
 make gpu-status # Check GPU availability and VRAM
+make gpu-preflight # Run before any GPU job; see AGENTS.md
 ```
 
 ## Tech Stack
